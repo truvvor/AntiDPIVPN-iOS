@@ -13,7 +13,6 @@ jobs:
 
       - name: Download LibXray.xcframework
         run: |
-          # Download pre-built LibXray from Xray-core release
           curl -L -o LibXray.xcframework.zip https://github.com/truvvor/Xray-core/releases/download/v1.0.0-ios/LibXray.xcframework.zip || true
           if [ -f LibXray.xcframework.zip ]; then
             unzip -q LibXray.xcframework.zip
@@ -33,7 +32,6 @@ jobs:
           TUNNEL_PROVISION_PROFILE_BASE64: ${{ secrets.TUNNEL_PROVISION_PROFILE_BASE64 }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # Create keychain
           CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
           MAIN_PP_PATH=$RUNNER_TEMP/main_pp.mobileprovision
           TUNNEL_PP_PATH=$RUNNER_TEMP/tunnel_pp.mobileprovision
@@ -51,52 +49,59 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-          # Download Apple intermediate certs
           curl -sL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o /tmp/AppleWWDRCAG3.cer
           curl -sL https://www.apple.com/certificateauthority/AppleRootCA-G3.cer -o /tmp/AppleRootCA-G3.cer
           security import /tmp/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
           security import /tmp/AppleRootCA-G3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
 
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $MAIN_PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/main.mobileprovision
-          cp $TUNNEL_PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/tunnel.mobileprovision
+          # Extract UUIDs and install profiles with UUID names
+          MAIN_UUID=$(security cms -D -i $MAIN_PP_PATH 2>/dev/null | plutil -extract UUID raw -)
+          TUNNEL_UUID=$(security cms -D -i $TUNNEL_PP_PATH 2>/dev/null | plutil -extract UUID raw -)
+          echo "Main profile UUID: $MAIN_UUID"
+          echo "Tunnel profile UUID: $TUNNEL_UUID"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp $MAIN_PP_PATH "$HOME/Library/MobileDevice/Provisioning Profiles/$MAIN_UUID.mobileprovision"
+          cp $TUNNEL_PP_PATH "$HOME/Library/MobileDevice/Provisioning Profiles/$TUNNEL_UUID.mobileprovision"
 
       - name: Build
         run: |
-          xcodebuild -project AntiDPIVPN.xcodeproj             -scheme AntiDPIVPN             -sdk iphoneos             -configuration Release             -derivedDataPath DerivedData             -destination "generic/platform=iOS"             DEVELOPMENT_TEAM=WJWU38ALPB             CODE_SIGN_STYLE=Manual             CODE_SIGN_IDENTITY="Apple Development"             PROVISIONING_PROFILE_SPECIFIER=""             CODE_SIGNING_ALLOWED=YES
+          xcodebuild -project AntiDPIVPN.xcodeproj \
+            -scheme AntiDPIVPN \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath DerivedData \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=YES
 
       - name: Create IPA
         run: |
           mkdir -p Payload
           cp -r DerivedData/Build/Products/Release-iphoneos/AntiDPIVPN.app Payload/
-          
-          # Embed provisioning profiles
-          cp $RUNNER_TEMP/main_pp.mobileprovision Payload/AntiDPIVPN.app/embedded.mobileprovision
-          if [ -d "Payload/AntiDPIVPN.app/PlugIns/PacketTunnelExtension.appex" ]; then
-            cp $RUNNER_TEMP/tunnel_pp.mobileprovision Payload/AntiDPIVPN.app/PlugIns/PacketTunnelExtension.appex/embedded.mobileprovision
-          fi
-          
-          # Re-sign
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          MAIN_PP_PATH=$RUNNER_TEMP/main_pp.mobileprovision
+          TUNNEL_PP_PATH=$RUNNER_TEMP/tunnel_pp.mobileprovision
           IDENTITY="Apple Development: Vladimir Vorkachev (AS23BV3K8Z)"
-          
-          # Sign frameworks
+
+          cp $MAIN_PP_PATH Payload/AntiDPIVPN.app/embedded.mobileprovision
+          if [ -d "Payload/AntiDPIVPN.app/PlugIns/PacketTunnelExtension.appex" ]; then
+            cp $TUNNEL_PP_PATH Payload/AntiDPIVPN.app/PlugIns/PacketTunnelExtension.appex/embedded.mobileprovision
+          fi
+
           for fw in Payload/AntiDPIVPN.app/Frameworks/*; do
             codesign --force --sign "$IDENTITY" --timestamp=none "$fw" || true
           done
-          
-          # Extract and use entitlements from profiles
-          security cms -D -i $RUNNER_TEMP/tunnel_pp.mobileprovision > /tmp/tunnel_profile.plist
+
+          security cms -D -i $TUNNEL_PP_PATH > /tmp/tunnel_profile.plist 2>/dev/null
           /usr/libexec/PlistBuddy -x -c "Print :Entitlements" /tmp/tunnel_profile.plist > /tmp/tunnel_ent.plist
-          security cms -D -i $RUNNER_TEMP/main_pp.mobileprovision > /tmp/main_profile.plist
+          security cms -D -i $MAIN_PP_PATH > /tmp/main_profile.plist 2>/dev/null
           /usr/libexec/PlistBuddy -x -c "Print :Entitlements" /tmp/main_profile.plist > /tmp/main_ent.plist
-          
-          # Sign extension
-          codesign --force --sign "$IDENTITY" --entitlements /tmp/tunnel_ent.plist --timestamp=none             Payload/AntiDPIVPN.app/PlugIns/PacketTunnelExtension.appex
-          
-          # Sign main app
-          codesign --force --sign "$IDENTITY" --entitlements /tmp/main_ent.plist --timestamp=none             Payload/AntiDPIVPN.app
-          
+
+          codesign --force --sign "$IDENTITY" --entitlements /tmp/tunnel_ent.plist --timestamp=none \
+            Payload/AntiDPIVPN.app/PlugIns/PacketTunnelExtension.appex
+          codesign --force --sign "$IDENTITY" --entitlements /tmp/main_ent.plist --timestamp=none \
+            Payload/AntiDPIVPN.app
+
           zip -qr AntiDPIVPN-signed.ipa Payload
 
       - name: Upload IPA
