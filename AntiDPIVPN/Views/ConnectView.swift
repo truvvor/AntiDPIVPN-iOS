@@ -1,8 +1,17 @@
 import SwiftUI
+import NetworkExtension
 
 struct ConnectView: View {
     @EnvironmentObject var viewModel: VPNViewModel
     @State private var showProfileSelector = false
+
+    private var isConnected: Bool {
+        viewModel.vpnManager.status == .connected
+    }
+
+    private var isConnecting: Bool {
+        viewModel.vpnManager.status == .connecting || viewModel.vpnManager.status == .reasserting
+    }
 
     var body: some View {
         VStack {
@@ -36,31 +45,38 @@ struct ConnectView: View {
 
                     // Connection Status
                     VStack(spacing: 20) {
-                        // Large Connection Button
                         Button(action: {
-                            if viewModel.xrayService.isRunning {
+                            if isConnected {
                                 viewModel.disconnectVPN()
-                            } else {
+                            } else if !isConnecting {
                                 viewModel.connectVPN()
                             }
                         }) {
                             ZStack {
                                 Circle()
-                                    .fill(viewModel.xrayService.isRunning ? Color.green : Color.blue)
+                                    .fill(isConnected ? Color.green : (isConnecting ? Color.orange : Color.blue))
                                     .frame(width: 160, height: 160)
-                                    .shadow(color: viewModel.xrayService.isRunning ? Color.green.opacity(0.4) : Color.blue.opacity(0.4), radius: 12)
+                                    .shadow(color: isConnected ? Color.green.opacity(0.4) : Color.blue.opacity(0.4), radius: 12)
 
                                 VStack(spacing: 8) {
-                                    Image(systemName: viewModel.xrayService.isRunning ? "checkmark.circle.fill" : "play.circle.fill")
-                                        .font(.system(size: 48))
-                                        .foregroundColor(.white)
+                                    if isConnecting {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(1.5)
+                                    } else {
+                                        Image(systemName: isConnected ? "checkmark.circle.fill" : "play.circle.fill")
+                                            .font(.system(size: 48))
+                                            .foregroundColor(.white)
+                                    }
 
-                                    Text(viewModel.xrayService.isRunning ? "Connected" : "Disconnected")
+                                    Text(viewModel.vpnManager.statusText)
                                         .font(.headline)
                                         .foregroundColor(.white)
                                 }
                             }
                         }
+                        .disabled(isConnecting)
+                        .accessibilityIdentifier("ConnectButton")
 
                         // Status Details
                         VStack(spacing: 8) {
@@ -80,14 +96,14 @@ struct ConnectView: View {
                             }
                             .foregroundColor(.secondary)
 
-                            if let errorMsg = viewModel.xrayService.errorMessage {
+                            if let errorMsg = viewModel.vpnManager.errorMessage {
                                 HStack {
                                     Label("Error", systemImage: "exclamationmark.triangle.fill")
                                         .foregroundColor(.red)
                                     Spacer()
                                     Text(errorMsg)
                                         .font(.caption)
-                                        .lineLimit(2)
+                                        .lineLimit(3)
                                 }
                                 .foregroundColor(.red)
                             }
@@ -111,7 +127,7 @@ struct ConnectView: View {
                             ForEach(viewModel.profiles) { profile in
                                 Button(action: { viewModel.setCurrentProfile(profile) }) {
                                     HStack {
-                                        Text(profile.name)
+                                        Text(profile.name.isEmpty ? "Unnamed" : profile.name)
                                         if profile.id == viewModel.currentProfile.id {
                                             Image(systemName: "checkmark")
                                         }
@@ -121,7 +137,7 @@ struct ConnectView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "rectangle.stack.fill")
-                                Text(viewModel.currentProfile.name)
+                                Text(viewModel.currentProfile.name.isEmpty ? "Select Profile" : viewModel.currentProfile.name)
                                 Spacer()
                                 Image(systemName: "chevron.down")
                             }
@@ -135,9 +151,6 @@ struct ConnectView: View {
                     .padding(.bottom, 20)
                 }
                 .padding()
-            }
-            .onAppear {
-                viewModel.refreshVPNState()
             }
         }
     }

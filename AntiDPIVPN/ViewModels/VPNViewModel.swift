@@ -4,7 +4,8 @@ import SwiftUI
 class VPNViewModel: ObservableObject {
     @Published var profiles: [VPNProfile] = []
     @Published var currentProfile: VPNProfile = VPNProfile()
-    @Published var xrayService: XrayService = XrayService()
+    @Published var vpnManager: VPNManager = VPNManager()
+    @Published var xrayVersion: String = "Unknown"
     @Published var socksPort: Int = 3080
     @Published var showLogs: Bool = false
     @Published var logs: [String] = []
@@ -15,6 +16,12 @@ class VPNViewModel: ObservableObject {
     init() {
         loadProfiles()
         loadCurrentProfile()
+        updateVersion()
+    }
+
+    // MARK: - Combined logs (app + VPNManager)
+    var allLogs: [String] {
+        return (logs + vpnManager.debugLog).sorted().reversed()
     }
 
     // MARK: - Profile Management
@@ -84,37 +91,68 @@ class VPNViewModel: ObservableObject {
         saveCurrentProfile()
     }
 
+    // MARK: - Profile Validation
+
+    func validateProfile(_ profile: VPNProfile) -> String? {
+        if profile.serverAddress.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Server address is not configured"
+        }
+        if profile.uuid.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "UUID is not configured"
+        }
+        if profile.realityPublicKey.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "REALITY public key is not configured"
+        }
+        if profile.realityShortId.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "REALITY short ID is not configured"
+        }
+        if profile.realityServerName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "REALITY server name is not configured"
+        }
+        if profile.antiDPISettings.enabled && profile.nfsPublicKey.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "NFS public key is required when Anti-DPI is enabled"
+        }
+        return nil
+    }
+
     // MARK: - VPN Connection
 
     func connectVPN() {
+        if let validationError = validateProfile(currentProfile) {
+            addLog("Configuration error: \(validationError)")
+            DispatchQueue.main.async {
+                self.vpnManager.errorMessage = validationError
+            }
+            return
+        }
+
         guard let config = ConfigGenerator.generateXrayConfig(from: currentProfile) else {
             addLog("Failed to generate Xray config")
             return
         }
 
-        let result = xrayService.startVPN(with: config)
-
-        switch result {
-        case .success:
-            addLog("VPN connected successfully")
-        case .failure(let error):
-            addLog("Connection failed: \(error.localizedDescription)")
-        }
+        addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort)...")
+        vpnManager.connect(profile: currentProfile, configJSON: config)
     }
 
     func disconnectVPN() {
-        let result = xrayService.stopVPN()
-
-        switch result {
-        case .success:
-            addLog("VPN disconnected")
-        case .failure(let error):
-            addLog("Disconnect failed: \(error.localizedDescription)")
-        }
+        vpnManager.disconnect()
+        addLog("VPN disconnected")
     }
 
-    func refreshVPNState() {
-        xrayService.refreshState()
+    // MARK: - Version
+
+    private func updateVersion() {
+        DispatchQueue.global(qos: .background).async {
+            let responseBase64 = LibXrayXrayVersion()
+            if let responseData = Data(base64Encoded: responseBase64),
+               let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+               let data = response["data"] as? String {
+                DispatchQueue.main.async {
+                    self.xrayVersion = data
+                }
+            }
+        }
     }
 
     // MARK: - Logging
@@ -132,6 +170,7 @@ class VPNViewModel: ObservableObject {
 
     func clearLogs() {
         logs.removeAll()
+        vpnManager.debugLog.removeAll()
     }
 
     // MARK: - Settings
