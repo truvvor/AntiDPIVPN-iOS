@@ -1,0 +1,28 @@
+name: AntiDPIVPN
+options:
+  bundleIdPrefix: com.truvvor
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "26.4"
+
+targets:
+  AntiDPIVPN:
+    type: application
+    platform: iOS
+    sources:
+      - path: AntiDPIVPN
+        type: group
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.truvvor.antidpivpn
+        INFOPLIST_FILE: AntiDPIVPN/Info.plist
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)"
+        CODE_SIGNING_ALLOWED: "NO"
+        SWIFT_OBJC_BRIDGING_HEADER: "AntiDPIVPN/AntiDPIVPN-Bridging-Header.h"
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks"
+        OTHER_LDFLAGS: ["-lresolv"]
+    dependencies:
+      - framework: LibXray.xcframework
+        embed: true
