@@ -19,9 +19,10 @@ targets:
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)"
-        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: WJWU38ALPB
         CODE_SIGN_IDENTITY: "Apple Development"
+        PROVISIONING_PROFILE_SPECIFIER: "AntiDPI VPN Development"
         SWIFT_OBJC_BRIDGING_HEADER: "AntiDPIVPN/AntiDPIVPN-Bridging-Header.h"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks"
         OTHER_LDFLAGS: ["-lresolv"]
@@ -44,9 +45,10 @@ targets:
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)"
-        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: WJWU38ALPB
         CODE_SIGN_IDENTITY: "Apple Development"
+        PROVISIONING_PROFILE_SPECIFIER: "AntiDPI VPN Tunnel Development"
         SWIFT_OBJC_BRIDGING_HEADER: "PacketTunnelExtension/PacketTunnelExtension-Bridging-Header.h"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks @executable_path/../../Frameworks"
         OTHER_LDFLAGS: ["-lresolv"]
