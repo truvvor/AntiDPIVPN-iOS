@@ -54,8 +54,8 @@ jobs:
           # Download Apple intermediate certs
           curl -sL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o /tmp/AppleWWDRCAG3.cer
           curl -sL https://www.apple.com/certificateauthority/AppleRootCA-G3.cer -o /tmp/AppleRootCA-G3.cer
-          security import /tmp/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign
-          security import /tmp/AppleRootCA-G3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign
+          security import /tmp/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
+          security import /tmp/AppleRootCA-G3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $MAIN_PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/main.mobileprovision
