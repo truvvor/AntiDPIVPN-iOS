@@ -37,17 +37,17 @@ struct SettingsView: View {
                         HStack {
                             Label("Version", systemImage: "info.circle")
                             Spacer()
-                            Text(viewModel.xrayService.version)
+                            Text(viewModel.xrayVersion)
                                 .font(.system(.footnote, design: .monospaced))
                                 .foregroundColor(.secondary)
                         }
 
                         HStack {
-                            Label("Status", systemImage: viewModel.xrayService.isRunning ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundColor(viewModel.xrayService.isRunning ? .green : .red)
+                            Label("VPN Status", systemImage: viewModel.vpnManager.isConnected ? "checkmark.circle.fill" : "xmark.circle")
+                                .foregroundColor(viewModel.vpnManager.isConnected ? .green : .red)
                             Spacer()
-                            Text(viewModel.xrayService.isRunning ? "Running" : "Stopped")
-                                .foregroundColor(viewModel.xrayService.isRunning ? .green : .red)
+                            Text(viewModel.vpnManager.statusText)
+                                .foregroundColor(viewModel.vpnManager.isConnected ? .green : .red)
                         }
                     }
 
@@ -82,10 +82,6 @@ struct SettingsView: View {
                             Text("Powered by Xray with anti-DPI capabilities")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-
-                            Link("Visit Xray Project", destination: URL(string: "https://github.com/XTLS/Xray-core")!)
-                                .font(.caption)
-                                .foregroundColor(.blue)
                         }
                         .padding(.vertical, 8)
                     }
@@ -118,7 +114,7 @@ struct LogsView: View {
                 )
                 .ignoresSafeArea()
 
-                if viewModel.logs.isEmpty {
+                if viewModel.allLogs.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "terminal")
                             .font(.system(size: 44))
@@ -133,7 +129,7 @@ struct LogsView: View {
                     }
                 } else {
                     List {
-                        ForEach(viewModel.logs, id: \.self) { log in
+                        ForEach(viewModel.allLogs, id: \.self) { log in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(log)
                                     .font(.system(.caption, design: .monospaced))

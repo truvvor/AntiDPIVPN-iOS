@@ -5,10 +5,12 @@ struct ProfileEditView: View {
     @EnvironmentObject var viewModel: VPNViewModel
     @State private var profile: VPNProfile
     @State private var isNew: Bool = false
+    @State private var portString: String = ""
 
     init(profile: VPNProfile, isNew: Bool = false) {
         _profile = State(initialValue: profile)
         _isNew = State(initialValue: isNew)
+        _portString = State(initialValue: String(profile.serverPort))
     }
 
     var body: some View {
@@ -32,33 +34,63 @@ struct ProfileEditView: View {
                     Section("Server Settings") {
                         TextField("Server Address", text: $profile.serverAddress)
                             .keyboardType(.URL)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
 
-                        Stepper(
-                            "Port: \(profile.serverPort)",
-                            value: $profile.serverPort,
-                            in: 1...65535
-                        )
+                        HStack {
+                            Text("Port")
+                            Spacer()
+                            TextField("443", text: $portString)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 100)
+                                .onChange(of: portString) { newValue in
+                                    let filtered = newValue.filter { $0.isNumber }
+                                    if filtered != newValue {
+                                        portString = filtered
+                                    }
+                                    if let port = Int(filtered), port >= 1 && port <= 65535 {
+                                        profile.serverPort = port
+                                    }
+                                }
+                        }
                     }
 
                     Section("UUID") {
                         TextField("UUID", text: $profile.uuid)
                             .font(.system(.caption, design: .monospaced))
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
                     }
 
                     Section("REALITY Settings") {
                         TextField("Public Key", text: $profile.realityPublicKey)
                             .font(.system(.caption, design: .monospaced))
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
 
                         TextField("Short ID", text: $profile.realityShortId)
                             .font(.system(.caption, design: .monospaced))
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
 
-                        TextField("Server Name", text: $profile.realityServerName)
+                        TextField("Server Name (SNI)", text: $profile.realityServerName)
+                            .keyboardType(.URL)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
 
                         Picker("Fingerprint", selection: $profile.realityFingerprint) {
                             ForEach(["chrome", "firefox", "safari", "edge"], id: \.self) { fp in
                                 Text(fp).tag(fp)
                             }
                         }
+                    }
+
+                    Section(header: Text("NFS Encryption"), footer: Text("X25519 public key for NFS encryption layer. Required when Anti-DPI is enabled.")) {
+                        TextField("NFS Public Key", text: $profile.nfsPublicKey)
+                            .font(.system(.caption, design: .monospaced))
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
                     }
 
                     Section {
@@ -78,6 +110,10 @@ struct ProfileEditView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        // Ensure port is valid before saving
+                        if let port = Int(portString), port >= 1 && port <= 65535 {
+                            profile.serverPort = port
+                        }
                         if isNew {
                             viewModel.addProfile(profile)
                         } else {
