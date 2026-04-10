@@ -2,6 +2,7 @@ import Foundation
 
 /// Parses and generates VLESS share URLs
 /// Format: vless://UUID@server:port?type=tcp&security=reality&fp=chrome&pbk=KEY&sid=ID&sni=SNI&flow=xtls-rprx-vision&encryption=ENC#Name
+/// IPv6: vless://UUID@[::1]:port?...
 struct VLESSURLParser {
 
     enum ParseError: LocalizedError {
@@ -54,15 +55,33 @@ struct VLESSURLParser {
         let hostPortAndQuery = hostPortQuery.components(separatedBy: "?")
         let hostPort = hostPortAndQuery[0]
 
-        // Parse host:port
-        let hostParts = hostPort.components(separatedBy: ":")
-        guard hostParts.count >= 2 else { throw ParseError.missingPort }
+        // Parse host:port - handle IPv6 brackets [::1]:port
+        let host: String
+        let portStr: String
+        if hostPort.hasPrefix("[") {
+            // IPv6 format: [addr]:port
+            guard let closeBracket = hostPort.firstIndex(of: "]") else {
+                throw ParseError.missingServer
+            }
+            host = String(hostPort[hostPort.index(after: hostPort.startIndex)..<closeBracket])
+            let afterBracket = hostPort[hostPort.index(after: closeBracket)...]
+            if afterBracket.hasPrefix(":") {
+                portStr = String(afterBracket.dropFirst())
+            } else {
+                throw ParseError.missingPort
+            }
+        } else {
+            // IPv4 or hostname: addr:port
+            let hostParts = hostPort.components(separatedBy: ":")
+            guard hostParts.count >= 2 else { throw ParseError.missingPort }
+            host = hostParts.dropLast().joined(separator: ":")
+            portStr = hostParts.last ?? ""
+        }
 
-        let host = hostParts.dropLast().joined(separator: ":")
         guard !host.isEmpty else { throw ParseError.missingServer }
         profile.serverAddress = host
 
-        guard let port = Int(hostParts.last ?? ""), port >= 1, port <= 65535 else {
+        guard let port = Int(portStr), port >= 1, port <= 65535 else {
             throw ParseError.missingPort
         }
         profile.serverPort = port
@@ -113,7 +132,15 @@ struct VLESSURLParser {
         let query = params.map { "\($0.0)=\($0.1)" }.joined(separator: "&")
         let name = profile.name.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? profile.name
 
-        return "vless://\(profile.uuid)@\(profile.serverAddress):\(profile.serverPort)?\(query)#\(name)"
+        // Wrap IPv6 addresses in brackets for URL
+        let hostPart: String
+        if profile.serverAddress.contains(":") {
+            hostPart = "[\(profile.serverAddress)]"
+        } else {
+            hostPart = profile.serverAddress
+        }
+
+        return "vless://\(profile.uuid)@\(hostPart):\(profile.serverPort)?\(query)#\(name)"
     }
 
     // MARK: - Private

@@ -1,4 +1,4 @@
-﻿import NetworkExtension
+import NetworkExtension
 import os.log
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
@@ -12,8 +12,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let AF_INET_BYTES: [UInt8] = [0, 0, 0, 2]
     private let AF_INET6_BYTES: [UInt8] = [0, 0, 0, 30]
 
+    /// Check if a string is an IPv6 address
+    private func isIPv6Address(_ address: String) -> Bool {
+        return address.contains(":")
+    }
+
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        os_log(.info, "PacketTunnelProvider: Starting tunnel (build 11)")
+        os_log(.info, "PacketTunnelProvider: Starting tunnel (build 12)")
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
               let providerConfig = protocolConfig.providerConfiguration,
               let configJSON = providerConfig["configJSON"] as? String else {
@@ -51,22 +56,46 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         os_log(.info, "PacketTunnelProvider: Xray started on SOCKS5 port %d", socksPort)
-        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: serverAddress.isEmpty ? "254.1.1.1" : serverAddress)
+
+        // Use a dummy IPv4 address for tunnelRemoteAddress if server is IPv6
+        let tunnelRemote: String
+        if serverAddress.isEmpty {
+            tunnelRemote = "254.1.1.1"
+        } else if isIPv6Address(serverAddress) {
+            tunnelRemote = "254.1.1.1"
+        } else {
+            tunnelRemote = serverAddress
+        }
+
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelRemote)
         settings.mtu = 1500
+
+        // IPv4 settings — always needed for tunnel interface
         let ipv4 = NEIPv4Settings(addresses: ["198.18.0.1"], subnetMasks: ["255.255.255.0"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
-        if !serverAddress.isEmpty {
+        if !serverAddress.isEmpty && !isIPv6Address(serverAddress) {
             ipv4.excludedRoutes = [NEIPv4Route(destinationAddress: serverAddress, subnetMask: "255.255.255.255")]
         }
         settings.ipv4Settings = ipv4
-        settings.dnsSettings = NEDNSSettings(servers: ["8.8.8.8"])
+
+        // IPv6 settings — needed for IPv6 server exclusion and full IPv6 tunnel
+        let ipv6 = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [128])
+        ipv6.includedRoutes = [NEIPv6Route.default()]
+        if !serverAddress.isEmpty && isIPv6Address(serverAddress) {
+            os_log(.info, "PacketTunnelProvider: Adding IPv6 excluded route for %{public}@", serverAddress)
+            ipv6.excludedRoutes = [NEIPv6Route(destinationAddress: serverAddress, networkPrefixLength: 128)]
+        }
+        settings.ipv6Settings = ipv6
+
+        settings.dnsSettings = NEDNSSettings(servers: ["8.8.8.8", "2001:4860:4860::8888"])
+
         setTunnelNetworkSettings(settings) { [weak self] error in
             if let error = error {
                 os_log(.error, "PacketTunnelProvider: setTunnelNetworkSettings failed: %{public}@", error.localizedDescription)
                 completionHandler(error)
                 return
             }
-            os_log(.info, "PacketTunnelProvider: Network settings applied, starting tun2socks")
+            os_log(.info, "PacketTunnelProvider: Network settings applied (IPv4+IPv6), starting tun2socks")
             self?.startTun2Socks(socksPort: socksPort)
             self?.isTunnelRunning = true
             completionHandler(nil)
