@@ -3,7 +3,9 @@ import SwiftUI
 struct ProfilesView: View {
     @EnvironmentObject var viewModel: VPNViewModel
     @State private var showAddProfile = false
-    @State private var editingProfile: VPNProfile? = nil
+    @State private var showImportURL = false
+    @State private var importURLText = ""
+    @State private var importError: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -28,7 +30,7 @@ struct ProfilesView: View {
                             Text("No Profiles")
                                 .font(.headline)
 
-                            Text("Create a new profile to get started")
+                            Text("Create a new profile or import from URL")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -49,6 +51,12 @@ struct ProfilesView: View {
                                             }
 
                                             Spacer()
+
+                                            if profile.antiDPISettings.enabled {
+                                                Image(systemName: "shield.checkered")
+                                                    .font(.caption)
+                                                    .foregroundColor(.purple)
+                                            }
                                         }
 
                                         HStack(spacing: 12) {
@@ -80,7 +88,21 @@ struct ProfilesView: View {
             .navigationTitle("Profiles")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: { showAddProfile = true }) {
+                    Menu {
+                        Button(action: { showAddProfile = true }) {
+                            Label("New Profile", systemImage: "plus")
+                        }
+                        Button(action: {
+                            importURLText = ""
+                            importError = nil
+                            showImportURL = true
+                        }) {
+                            Label("Import from URL", systemImage: "link.badge.plus")
+                        }
+                        Button(action: importFromClipboard) {
+                            Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
+                        }
+                    } label: {
                         Image(systemName: "plus.circle.fill")
                     }
                 }
@@ -89,7 +111,41 @@ struct ProfilesView: View {
                 ProfileEditView(profile: VPNProfile(), isNew: true)
                     .environmentObject(viewModel)
             }
+            .alert("Import from URL", isPresented: $showImportURL) {
+                TextField("vless://...", text: $importURLText)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                Button("Import") { importFromURL() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if let error = importError {
+                    Text(error)
+                } else {
+                    Text("Paste a VLESS share URL to create a profile")
+                }
+            }
         }
+    }
+
+    private func importFromURL() {
+        do {
+            let profile = try VLESSURLParser.parse(importURLText)
+            viewModel.addProfile(profile)
+            importError = nil
+        } catch {
+            importError = error.localizedDescription
+            showImportURL = true
+        }
+    }
+
+    private func importFromClipboard() {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else {
+            importError = "Clipboard is empty"
+            showImportURL = true
+            return
+        }
+        importURLText = text
+        importFromURL()
     }
 }
 

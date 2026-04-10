@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00E50E924788BB856674FA8F /* VLESSURLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD10C25667B4CE7C78E6B9D /* VLESSURLParser.swift */; };
 		1B197B389DB1AE755EDA9BD3 /* LibXray.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 92D12C5179DA6EA5CE297CFB /* LibXray.xcframework */; };
 		325BD3496E08C0FD5C049997 /* AntiDPISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDF4425BC33780BA288AAB2 /* AntiDPISettingsView.swift */; };
+		4DC28A07F4A1B0379F33CC00 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3E73AF3D9521853032E7DA74 /* Assets.xcassets */; };
 		51F751A137485D9A7BFB0E15 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBC5F059AB01B17FF30C3615 /* PacketTunnelProvider.swift */; };
 		533B44376806DAECAFFB570C /* ProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA84112D548F283CB4719759 /* ProfilesView.swift */; };
 		55B770B19187D6B4A3158905 /* VPNManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A06439C4642DA0542D90862B /* VPNManager.swift */; };
@@ -64,8 +66,10 @@
 /* Begin PBXFileReference section */
 		1A2E2E0E2C4BB3ADF23E1738 /* HevSocks5Tunnel.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HevSocks5Tunnel.xcframework; sourceTree = "<group>"; };
 		1D5060DC524D486F75B03C0A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		2AD10C25667B4CE7C78E6B9D /* VLESSURLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLESSURLParser.swift; sourceTree = "<group>"; };
 		3083C3E82DB8FB4FA8D20983 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		37F31ACBA6ECA9C57CDA2B80 /* PacketTunnelExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnelExtension.entitlements; sourceTree = "<group>"; };
+		3E73AF3D9521853032E7DA74 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		44EE8A44D83D2670B55B6490 /* AntiDPISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntiDPISettings.swift; sourceTree = "<group>"; };
 		482B95CEB125D8124C1A6933 /* PacketTunnelExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PacketTunnelExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D99CB00F82258A0AA20810C /* AntiDPIVPN.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AntiDPIVPN.entitlements; sourceTree = "<group>"; };
@@ -111,6 +115,7 @@
 			isa = PBXGroup;
 			children = (
 				C9B6193A2DC95189BD22A913 /* ConfigGenerator.swift */,
+				2AD10C25667B4CE7C78E6B9D /* VLESSURLParser.swift */,
 				A06439C4642DA0542D90862B /* VPNManager.swift */,
 			);
 			path = Services;
@@ -150,6 +155,7 @@
 				A1649845428E66AEB3BA0D65 /* AntiDPIVPN-Bridging-Header.h */,
 				4D99CB00F82258A0AA20810C /* AntiDPIVPN.entitlements */,
 				9A8EA7544BF2BF50D5A91CFE /* AntiDPIVPNApp.swift */,
+				3E73AF3D9521853032E7DA74 /* Assets.xcassets */,
 				3083C3E82DB8FB4FA8D20983 /* Info.plist */,
 				559FE18D31C56EF08D4A3E8B /* Models */,
 				07ECBBA64A65EFDB0A1920E5 /* Services */,
@@ -225,6 +231,7 @@
 			buildConfigurationList = 533514D48AF306D59CF2816A /* Build configuration list for PBXNativeTarget "AntiDPIVPN" */;
 			buildPhases = (
 				4D0300AE9D4D4B7763F58843 /* Sources */,
+				91BBBAC9A5860355185AA615 /* Resources */,
 				DA441633AE130516FE9387F8 /* Frameworks */,
 				63D8324BE35064BEB7658FDE /* Embed Foundation Extensions */,
 				9C3483920435FC46DF897F8F /* Embed Frameworks */,
@@ -280,6 +287,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		91BBBAC9A5860355185AA615 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4DC28A07F4A1B0379F33CC00 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		060C53E436AE8D356318CEAA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -301,6 +319,7 @@
 				9D86BECFFB28AA12004A3733 /* ProfileEditView.swift in Sources */,
 				533B44376806DAECAFFB570C /* ProfilesView.swift in Sources */,
 				92F15DE1DA18534BF40ECE64 /* SettingsView.swift in Sources */,
+				00E50E924788BB856674FA8F /* VLESSURLParser.swift in Sources */,
 				55B770B19187D6B4A3158905 /* VPNManager.swift in Sources */,
 				CC90D65A3F878081D1E933D8 /* VPNProfile.swift in Sources */,
 				74BFB8D8A00F7B1611C5FAB5 /* VPNViewModel.swift in Sources */,
@@ -322,7 +341,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PacketTunnelExtension/PacketTunnelExtension.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = WJWU38ALPB;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -334,7 +352,7 @@
 				OTHER_LDFLAGS = (
 					"-lresolv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.antidpivpn.tunnel;
+				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.secureconnect.tunnel;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = "PacketTunnelExtension/PacketTunnelExtension-Bridging-Header.h";
 				SWIFT_VERSION = 5.9;
@@ -466,7 +484,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AntiDPIVPN/AntiDPIVPN.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = WJWU38ALPB;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -478,7 +496,7 @@
 				OTHER_LDFLAGS = (
 					"-lresolv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.antidpivpn;
+				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.secureconnect;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = "AntiDPIVPN/AntiDPIVPN-Bridging-Header.h";
 				SWIFT_VERSION = 5.9;
@@ -490,7 +508,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PacketTunnelExtension/PacketTunnelExtension.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = WJWU38ALPB;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -502,7 +519,7 @@
 				OTHER_LDFLAGS = (
 					"-lresolv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.antidpivpn.tunnel;
+				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.secureconnect.tunnel;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = "PacketTunnelExtension/PacketTunnelExtension-Bridging-Header.h";
 				SWIFT_VERSION = 5.9;
@@ -515,7 +532,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AntiDPIVPN/AntiDPIVPN.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = WJWU38ALPB;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -527,7 +544,7 @@
 				OTHER_LDFLAGS = (
 					"-lresolv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.antidpivpn;
+				PRODUCT_BUNDLE_IDENTIFIER = com.truvvor.secureconnect;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = "AntiDPIVPN/AntiDPIVPN-Bridging-Header.h";
 				SWIFT_VERSION = 5.9;

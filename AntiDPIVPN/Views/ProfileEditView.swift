@@ -6,6 +6,11 @@ struct ProfileEditView: View {
     @State private var profile: VPNProfile
     @State private var isNew: Bool = false
     @State private var portString: String = ""
+    @State private var showShareSheet = false
+    @State private var showImportURL = false
+    @State private var importURLText = ""
+    @State private var importError: String? = nil
+    @State private var shareURL: String = ""
 
     init(profile: VPNProfile, isNew: Bool = false) {
         _profile = State(initialValue: profile)
@@ -27,6 +32,24 @@ struct ProfileEditView: View {
                 .ignoresSafeArea()
 
                 Form {
+                    // Import from URL section for new profiles
+                    if isNew {
+                        Section {
+                            Button(action: {
+                                if let text = UIPasteboard.general.string,
+                                   text.lowercased().hasPrefix("vless://") {
+                                    importURLText = text
+                                } else {
+                                    importURLText = ""
+                                }
+                                importError = nil
+                                showImportURL = true
+                            }) {
+                                Label("Import from URL", systemImage: "link.badge.plus")
+                            }
+                        }
+                    }
+
                     Section("Profile Name") {
                         TextField("Profile Name", text: $profile.name)
                     }
@@ -96,6 +119,18 @@ struct ProfileEditView: View {
                     Section {
                         NavigationLink("Anti-DPI Settings", destination: AntiDPISettingsView(settings: $profile.antiDPISettings))
                     }
+
+                    // Share URL section for existing profiles
+                    if !isNew {
+                        Section("Share") {
+                            Button(action: {
+                                shareURL = VLESSURLParser.generate(from: profile)
+                                UIPasteboard.general.string = shareURL
+                            }) {
+                                Label("Copy Share URL", systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -110,7 +145,6 @@ struct ProfileEditView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        // Ensure port is valid before saving
                         if let port = Int(portString), port >= 1 && port <= 65535 {
                             profile.serverPort = port
                         }
@@ -121,6 +155,29 @@ struct ProfileEditView: View {
                         }
                         dismiss()
                     }
+                }
+            }
+            .alert("Import from URL", isPresented: $showImportURL) {
+                TextField("vless://...", text: $importURLText)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                Button("Import") {
+                    do {
+                        let parsed = try VLESSURLParser.parse(importURLText)
+                        profile = parsed
+                        portString = String(parsed.serverPort)
+                        importError = nil
+                    } catch {
+                        importError = error.localizedDescription
+                        showImportURL = true
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if let error = importError {
+                    Text(error)
+                } else {
+                    Text("Paste a VLESS share URL")
                 }
             }
         }

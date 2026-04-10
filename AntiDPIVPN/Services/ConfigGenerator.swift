@@ -3,14 +3,15 @@ import Foundation
 struct ConfigGenerator {
     static func generateXrayConfig(from profile: VPNProfile) -> String? {
         // Build encryption field
-        // When anti-DPI is enabled, use NFS encryption key (NOT the REALITY key)
-        // When disabled, VLESS requires "none"
         let encryptionField: String
         if profile.antiDPISettings.enabled && !profile.nfsPublicKey.isEmpty {
-            encryptionField = "mlkem768x25519plus.native.1rtt.\(profile.nfsPublicKey)"
+            encryptionField = "mlkem768x25519plus.native.0rtt.\(profile.nfsPublicKey)"
         } else {
             encryptionField = "none"
         }
+
+        // Flow: xtls-rprx-vision for REALITY
+        let flowField = "xtls-rprx-vision"
 
         let config: [String: Any] = [
             "log": [
@@ -37,7 +38,7 @@ struct ConfigGenerator {
                                 "users": [
                                     [
                                         "id": profile.uuid,
-                                        "flow": "",
+                                        "flow": flowField,
                                         "encryption": encryptionField
                                     ] as [String: Any]
                                 ]

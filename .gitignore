@@ -1,8 +1,36 @@
-.DS_Store
+# Xcode
 build/
 DerivedData/
-*.xcuserstate
-*.xcworkspace
-xcuserdata/
-LibXray.xcframework/
-*.md
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Private keys and certificates
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+private_keys/
+
+# OS files
+.DS_Store
+*.swp
+*~
+
+# Export options
+ExportOptions.plist
+
+# Logs
+*.log

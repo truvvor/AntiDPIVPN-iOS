@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 class VPNViewModel: ObservableObject {
     @Published var profiles: [VPNProfile] = []
@@ -10,21 +11,27 @@ class VPNViewModel: ObservableObject {
     @Published var showLogs: Bool = false
     @Published var logs: [String] = []
 
+    private var cancellables = Set<AnyCancellable>()
     private let profilesUserDefaultsKey = "vpn_profiles"
     private let currentProfileUserDefaultsKey = "current_profile"
 
     init() {
+        // Forward vpnManager changes to trigger SwiftUI re-render
+        vpnManager.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
         loadProfiles()
         loadCurrentProfile()
         updateVersion()
     }
 
-    // MARK: - Combined logs (app + VPNManager)
     var allLogs: [String] {
         return (logs + vpnManager.debugLog).sorted().reversed()
     }
-
-    // MARK: - Profile Management
 
     func loadProfiles() {
         if let data = UserDefaults.standard.data(forKey: profilesUserDefaultsKey),
@@ -57,7 +64,6 @@ class VPNViewModel: ObservableObject {
             updated.updatedAt = Date()
             profiles[index] = updated
             saveProfiles()
-
             if currentProfile.id == profile.id {
                 currentProfile = updated
                 saveCurrentProfile()
@@ -91,46 +97,26 @@ class VPNViewModel: ObservableObject {
         saveCurrentProfile()
     }
 
-    // MARK: - Profile Validation
-
     func validateProfile(_ profile: VPNProfile) -> String? {
-        if profile.serverAddress.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "Server address is not configured"
-        }
-        if profile.uuid.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "UUID is not configured"
-        }
-        if profile.realityPublicKey.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "REALITY public key is not configured"
-        }
-        if profile.realityShortId.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "REALITY short ID is not configured"
-        }
-        if profile.realityServerName.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "REALITY server name is not configured"
-        }
-        if profile.antiDPISettings.enabled && profile.nfsPublicKey.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "NFS public key is required when Anti-DPI is enabled"
-        }
+        if profile.serverAddress.trimmingCharacters(in: .whitespaces).isEmpty { return "Server address is not configured" }
+        if profile.uuid.trimmingCharacters(in: .whitespaces).isEmpty { return "UUID is not configured" }
+        if profile.realityPublicKey.trimmingCharacters(in: .whitespaces).isEmpty { return "REALITY public key is not configured" }
+        if profile.realityShortId.trimmingCharacters(in: .whitespaces).isEmpty { return "REALITY short ID is not configured" }
+        if profile.realityServerName.trimmingCharacters(in: .whitespaces).isEmpty { return "REALITY server name is not configured" }
+        if profile.antiDPISettings.enabled && profile.nfsPublicKey.trimmingCharacters(in: .whitespaces).isEmpty { return "NFS public key is required when Anti-DPI is enabled" }
         return nil
     }
-
-    // MARK: - VPN Connection
 
     func connectVPN() {
         if let validationError = validateProfile(currentProfile) {
             addLog("Configuration error: \(validationError)")
-            DispatchQueue.main.async {
-                self.vpnManager.errorMessage = validationError
-            }
+            DispatchQueue.main.async { self.vpnManager.errorMessage = validationError }
             return
         }
-
         guard let config = ConfigGenerator.generateXrayConfig(from: currentProfile) else {
             addLog("Failed to generate Xray config")
             return
         }
-
         addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort)...")
         vpnManager.connect(profile: currentProfile, configJSON: config)
     }
@@ -140,31 +126,23 @@ class VPNViewModel: ObservableObject {
         addLog("VPN disconnected")
     }
 
-    // MARK: - Version
-
     private func updateVersion() {
         DispatchQueue.global(qos: .background).async {
             let responseBase64 = LibXrayXrayVersion()
             if let responseData = Data(base64Encoded: responseBase64),
                let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
                let data = response["data"] as? String {
-                DispatchQueue.main.async {
-                    self.xrayVersion = data
-                }
+                DispatchQueue.main.async { self.xrayVersion = data }
             }
         }
     }
-
-    // MARK: - Logging
 
     func addLog(_ message: String) {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         let logEntry = "[\(timestamp)] \(message)"
         DispatchQueue.main.async {
             self.logs.insert(logEntry, at: 0)
-            if self.logs.count > 100 {
-                self.logs.removeLast()
-            }
+            if self.logs.count > 100 { self.logs.removeLast() }
         }
     }
 
@@ -172,8 +150,6 @@ class VPNViewModel: ObservableObject {
         logs.removeAll()
         vpnManager.debugLog.removeAll()
     }
-
-    // MARK: - Settings
 
     func setSocksPort(_ port: Int) {
         self.socksPort = port

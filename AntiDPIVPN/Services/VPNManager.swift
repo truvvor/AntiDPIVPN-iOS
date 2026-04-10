@@ -8,16 +8,18 @@ class VPNManager: ObservableObject {
     @Published var debugLog: [String] = []
 
     private var manager: NETunnelProviderManager?
+    private var statusObserver: NSObjectProtocol?
 
     init() {
         log("VPNManager init")
+        setupStatusObserver()
         loadManager()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(vpnStatusChanged),
-            name: .NEVPNStatusDidChange,
-            object: nil
-        )
+    }
+
+    deinit {
+        if let observer = statusObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func log(_ message: String) {
@@ -29,104 +31,106 @@ class VPNManager: ObservableObject {
         }
     }
 
-    private func loadManager() {
-        log("Loading VPN managers from preferences...")
-        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
-            if let error = error {
-                let nsErr = error as NSError
-                self?.log("LOAD ERROR: \(error.localizedDescription) [code=\(nsErr.code) domain=\(nsErr.domain)]")
-                DispatchQueue.main.async {
-                    self?.errorMessage = "VPN load error: \(error.localizedDescription)"
-                }
-                return
-            }
-
-            let count = managers?.count ?? 0
-            self?.log("Loaded \(count) manager(s)")
-
-            if let existing = managers?.first {
-                self?.manager = existing
-                self?.log("Using existing manager")
-            } else {
-                self?.manager = NETunnelProviderManager()
-                self?.log("Created new manager")
-            }
-
-            DispatchQueue.main.async {
-                self?.status = self?.manager?.connection.status ?? .disconnected
-                self?.log("Initial status: \(self?.statusText ?? "?")")
-            }
-        }
-    }
-
-    @objc private func vpnStatusChanged(_ notification: Notification) {
-        guard let connection = notification.object as? NEVPNConnection else { return }
-        DispatchQueue.main.async {
-            self.status = connection.status
+    private func setupStatusObserver() {
+        statusObserver = NotificationCenter.default.addObserver(
+            forName: .NEVPNStatusDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            // Always read status from our manager's connection, not from notification object
+            // This prevents stale connection objects from giving wrong status
+            let newStatus = self.manager?.connection.status ?? .disconnected
+            self.status = newStatus
             self.log("Status -> \(self.statusText)")
         }
     }
 
+    private func loadManager() {
+        log("Loading VPN managers...")
+        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
+            guard let self = self else { return }
+            if let error = error {
+                self.log("LOAD ERROR: \(error.localizedDescription)")
+                return
+            }
+            self.log("Loaded \(managers?.count ?? 0) manager(s)")
+            if let existing = managers?.first {
+                self.manager = existing
+                self.log("Using existing manager")
+            } else {
+                self.manager = NETunnelProviderManager()
+                self.log("Created new manager")
+            }
+            DispatchQueue.main.async {
+                self.status = self.manager?.connection.status ?? .disconnected
+                self.log("Initial status: \(self.statusText)")
+            }
+        }
+    }
+
     func connect(profile: VPNProfile, configJSON: String) {
-        log("connect() called for \(profile.serverAddress):\(profile.serverPort)")
+        log("connect() for \(profile.serverAddress):\(profile.serverPort)")
 
         guard let manager = manager else {
-            let msg = "VPN manager is nil — NETunnelProviderManager not loaded"
-            log("ERROR: \(msg)")
-            DispatchQueue.main.async { self.errorMessage = msg }
+            log("ERROR: manager is nil")
+            DispatchQueue.main.async { self.errorMessage = "VPN manager not loaded" }
             return
         }
 
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
-        let libraryPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].path
-
         let proto = NETunnelProviderProtocol()
-        proto.providerBundleIdentifier = "com.truvvor.antidpivpn.tunnel"
+        proto.providerBundleIdentifier = "com.truvvor.secureconnect.tunnel"
         proto.serverAddress = profile.serverAddress.isEmpty ? "VPN Server" : profile.serverAddress
+        proto.disconnectOnSleep = false
         proto.providerConfiguration = [
             "configJSON": configJSON,
-            "datDir": (documentsPath as NSString).appendingPathComponent("xray_dat"),
-            "mphCachePath": (libraryPath as NSString).appendingPathComponent("xray_cache"),
-            "socksPort": 3080
+            "socksPort": 3080,
+            "serverAddress": profile.serverAddress
         ] as [String: Any]
 
         manager.protocolConfiguration = proto
         manager.localizedDescription = "AntiDPI VPN"
         manager.isEnabled = true
 
-        log("Saving to preferences...")
-
+        log("Saving...")
         manager.saveToPreferences { [weak self] error in
+            guard let self = self else { return }
             if let error = error {
-                let nsErr = error as NSError
-                let msg = "SAVE FAILED: \(error.localizedDescription) [code=\(nsErr.code) domain=\(nsErr.domain)]"
-                self?.log(msg)
-                DispatchQueue.main.async { self?.errorMessage = msg }
+                self.log("SAVE FAILED: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.errorMessage = "Save failed: \(error.localizedDescription)" }
                 return
             }
+            self.log("Save OK, reloading...")
 
-            self?.log("Save OK, reloading...")
-
-            manager.loadFromPreferences { error in
+            // CRITICAL: After save, must loadAllFromPreferences to get fresh manager object
+            NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
+                guard let self = self else { return }
                 if let error = error {
-                    let nsErr = error as NSError
-                    let msg = "RELOAD FAILED: \(error.localizedDescription) [code=\(nsErr.code) domain=\(nsErr.domain)]"
-                    self?.log(msg)
-                    DispatchQueue.main.async { self?.errorMessage = msg }
+                    self.log("RELOAD FAILED: \(error.localizedDescription)")
+                    DispatchQueue.main.async { self.errorMessage = "Reload failed: \(error.localizedDescription)" }
                     return
                 }
 
-                self?.log("Reload OK, starting tunnel...")
+                guard let freshManager = managers?.first else {
+                    self.log("ERROR: No manager after reload")
+                    return
+                }
+
+                self.manager = freshManager
+                self.log("Got fresh manager, starting tunnel...")
+
+                DispatchQueue.main.async {
+                    self.status = freshManager.connection.status
+                }
 
                 do {
-                    try manager.connection.startVPNTunnel()
-                    self?.log("startVPNTunnel() called OK")
-                    DispatchQueue.main.async { self?.errorMessage = nil }
+                    try freshManager.connection.startVPNTunnel()
+                    self.log("startVPNTunnel() called OK")
+                    DispatchQueue.main.async { self.errorMessage = nil }
                 } catch {
-                    let nsErr = error as NSError
-                    let msg = "START FAILED: \(error.localizedDescription) [code=\(nsErr.code) domain=\(nsErr.domain)]"
-                    self?.log(msg)
-                    DispatchQueue.main.async { self?.errorMessage = msg }
+                    let msg = "START FAILED: \(error.localizedDescription)"
+                    self.log(msg)
+                    DispatchQueue.main.async { self.errorMessage = msg }
                 }
             }
         }
@@ -137,13 +141,8 @@ class VPNManager: ObservableObject {
         manager?.connection.stopVPNTunnel()
     }
 
-    var isConnected: Bool {
-        return status == .connected
-    }
-
-    var isConnecting: Bool {
-        return status == .connecting
-    }
+    var isConnected: Bool { status == .connected }
+    var isConnecting: Bool { status == .connecting }
 
     var statusText: String {
         switch status {
@@ -151,7 +150,7 @@ class VPNManager: ObservableObject {
         case .connecting: return "Connecting..."
         case .disconnecting: return "Disconnecting..."
         case .disconnected: return "Disconnected"
-        case .invalid: return "Invalid"
+        case .invalid: return "Not Configured"
         case .reasserting: return "Reconnecting..."
         @unknown default: return "Unknown"
         }

@@ -14,15 +14,13 @@ targets:
         type: group
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.truvvor.antidpivpn
+        PRODUCT_BUNDLE_IDENTIFIER: com.truvvor.secureconnect
         INFOPLIST_FILE: AntiDPIVPN/Info.plist
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)"
-        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WJWU38ALPB
-        CODE_SIGN_IDENTITY: "Apple Development"
-        PROVISIONING_PROFILE_SPECIFIER: "AntiDPI VPN Development"
         SWIFT_OBJC_BRIDGING_HEADER: "AntiDPIVPN/AntiDPIVPN-Bridging-Header.h"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks"
         OTHER_LDFLAGS: ["-lresolv"]
@@ -40,15 +38,13 @@ targets:
         type: group
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.truvvor.antidpivpn.tunnel
+        PRODUCT_BUNDLE_IDENTIFIER: com.truvvor.secureconnect.tunnel
         INFOPLIST_FILE: PacketTunnelExtension/Info.plist
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)"
-        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WJWU38ALPB
-        CODE_SIGN_IDENTITY: "Apple Development"
-        PROVISIONING_PROFILE_SPECIFIER: "AntiDPI VPN Tunnel Development"
         SWIFT_OBJC_BRIDGING_HEADER: "PacketTunnelExtension/PacketTunnelExtension-Bridging-Header.h"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks @executable_path/../../Frameworks"
         OTHER_LDFLAGS: ["-lresolv"]
