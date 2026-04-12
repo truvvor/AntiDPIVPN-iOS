@@ -1,9 +1,10 @@
 import NetworkExtension
 import os.log
 
-/// Build 29 — Single-mode, memory-optimized.
-/// Xray runs in extension with reduced mimicry (0.12) and infrastructure optimizations.
-/// App-side mode removed (iOS sandbox blocks cross-process localhost).
+/// Build 36 — Clean single-mode, no memory throttling.
+/// Trust iOS to manage memory. If extension is killed by jetsam,
+/// iOS auto-reconnects the VPN (disconnectOnSleep=false).
+/// connIdle=30s policy handles stale connection cleanup.
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1
@@ -24,10 +25,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // Pre-built AF headers
     private static let afInet4Header = Data([0, 0, 0, 2])
     private static let afInet6Header = Data([0, 0, 0, 30])
-
-    // Memory pressure level: 0=normal, 1=light, 2=severe
-    private var memoryPressureLevel: Int = 0
-    private var dropCounter: UInt64 = 0
 
     // Logging
     private var logFileHandle: FileHandle?
@@ -71,7 +68,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         logBuffer.removeAll(keepingCapacity: true)
     }
 
-    // MARK: - Memory
+    // MARK: - Memory (diagnostic only, no throttling)
 
     private func getMemoryMB() -> (used: Double, avail: Double) {
         var info = mach_task_basic_info()
@@ -88,27 +85,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func startMemoryMonitor() {
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.schedule(deadline: .now() + 5, repeating: 15)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
-            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) drop=\(self.packetsDropped)")
-
-            // Graduated memory pressure — only throttle inbound, never block outbound
-            // Thresholds tuned based on real data: Go stabilizes at avail ~20-23MB
-            let oldLevel = self.memoryPressureLevel
-            if m.avail < 10.0 && m.avail > 0 {
-                self.memoryPressureLevel = 2 // severe: drop 75% inbound
-            } else if m.avail < 15.0 && m.avail > 0 {
-                self.memoryPressureLevel = 1 // light: drop 25% inbound
-            } else if m.avail > 18.0 {
-                self.memoryPressureLevel = 0 // normal
-            }
-            if oldLevel != self.memoryPressureLevel {
-                let desc = ["normal", "light(drop 25% inbound)", "severe(drop 75% inbound)"]
-                self.fileLog("Memory pressure: \(desc[self.memoryPressureLevel]) avail=\(String(format: "%.1f", m.avail))MB")
-            }
-
+            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
         }
         memoryTimer = timer
         timer.resume()
@@ -167,7 +148,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 35) — connIdle=30s policy")
+        fileLog("Starting tunnel (build 36) — no throttle, trust iOS")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -180,13 +161,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let serverAddress = providerConfig["serverAddress"] as? String ?? ""
         fileLog("configJSON length=\(configJSON.count) server=\(serverAddress)")
 
-        // Start xray-core
         guard startXray(configJSON: configJSON) else {
             completionHandler(NSError(domain: "PTP", code: -3, userInfo: [NSLocalizedDescriptionKey: "Xray failed to start"]))
             return
         }
 
-        // Network settings
         let tunnelRemote = (serverAddress.isEmpty || isIPv6Address(serverAddress)) ? "254.1.1.1" : serverAddress
 
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelRemote)
@@ -226,7 +205,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    // MARK: - Tun2Socks Relay
+    // MARK: - Tun2Socks Relay (no throttling — full speed always)
 
     private func startTun2Socks(socksPort: Int) {
         var fds: [Int32] = [0, 0]
@@ -237,7 +216,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         tunSideFd = fds[0]
         appSideFd = fds[1]
 
-        // 128KB socket buffers (vs 2MB in old builds — saves ~7.5MB)
         var bufSize: Int32 = 128 * 1024
         setsockopt(tunSideFd, SOL_SOCKET, SO_RCVBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(tunSideFd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
@@ -279,13 +257,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// packetFlow → tun2socks (outbound: NEVER drop — apps must close connections)
+    /// packetFlow → tun2socks (always forward, never drop)
     private func startReadingFromPacketFlow() {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self = self, self.isRelayRunning else { return }
 
-            // ALWAYS forward outbound packets — connection teardown (FIN/RST)
-            // must work so xray can close connections and free Go memory
             for (i, packet) in packets.enumerated() {
                 let protoNum = protocols[i] as! Int32
                 let afHeader = (protoNum == AF_INET6) ? Self.afInet6Header : Self.afInet4Header
@@ -308,7 +284,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// tun2socks → packetFlow (inbound: graduated dropping under memory pressure)
+    /// tun2socks → packetFlow (always forward, never drop)
     private func startReadingFromTun2Socks() {
         let source = DispatchSource.makeReadSource(fileDescriptor: appSideFd, queue: DispatchQueue.global(qos: .userInitiated))
         source.setEventHandler { [weak self] in
@@ -320,22 +296,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             while true {
                 let n = read(self.appSideFd, buf, self.readBufSize)
                 if n <= 4 { break }
-
-                // Light inbound throttle — barely noticeable but prevents OOM
-                let pressure = self.memoryPressureLevel
-                if pressure > 0 {
-                    self.dropCounter += 1
-                    let shouldDrop: Bool
-                    if pressure >= 2 {
-                        shouldDrop = (self.dropCounter % 4) != 0 // keep 1 in 4 (drop 75%)
-                    } else {
-                        shouldDrop = (self.dropCounter % 4) == 0 // keep 3 in 4 (drop 25%)
-                    }
-                    if shouldDrop {
-                        self.packetsDropped += 1
-                        continue
-                    }
-                }
 
                 let af = UInt32(buf[0]) << 24 | UInt32(buf[1]) << 16 | UInt32(buf[2]) << 8 | UInt32(buf[3])
                 let proto: NSNumber = (af == 30) ? NSNumber(value: AF_INET6) : NSNumber(value: AF_INET)

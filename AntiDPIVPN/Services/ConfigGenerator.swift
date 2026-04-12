@@ -82,26 +82,18 @@ struct ConfigGenerator {
             "concurrency": -1
         ]
 
-        // Connection policy: aggressive cleanup of idle connections.
-        // Default connIdle=300s — 96 speed test connections sit 5 min hogging memory.
-        // With connIdle=30s — stale connections close in 30s, freeing Go goroutines.
-        // bufferSize=2 — 2KB per connection vs default (reduces per-connection memory).
+        // Connection policy: fast cleanup of idle connections.
+        // Default connIdle=300s (5min!) — stale connections hog Go memory.
+        // With connIdle=60s — idle connections close in 1min, freeing goroutines.
         let policy: [String: Any] = [
             "levels": [
                 "0": [
                     "handshake": 4,
-                    "connIdle": 30,
-                    "uplinkOnly": 1,
-                    "downlinkOnly": 2,
-                    "bufferSize": 2
+                    "connIdle": 60,
+                    "uplinkOnly": 2,
+                    "downlinkOnly": 5
                 ] as [String: Any]
-            ],
-            "system": [
-                "statsInboundUplink": false,
-                "statsInboundDownlink": false,
-                "statsOutboundUplink": false,
-                "statsOutboundDownlink": false
-            ] as [String: Any]
+            ]
         ]
 
         let config: [String: Any] = [
