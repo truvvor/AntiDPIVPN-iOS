@@ -2,10 +2,13 @@ import Foundation
 
 struct ConfigGenerator {
     /// Generate xray JSON config optimized for Network Extension (~50MB limit).
-    /// All anti-DPI features preserved but tuned for low memory:
-    /// - mimicry sensitivity 0.12 (~8× fewer fake writes vs 0.5)
-    /// - fragment length 150-250 (~5× fewer fragments vs 20-40)
-    /// - rotateAfter 300s (less churn vs 60s)
+    ///
+    /// Key memory optimization: MUX enabled with concurrency=8.
+    /// Instead of 60-90 separate Go goroutines/connections (~65MB),
+    /// all traffic multiplexed through 8 transport connections (~45MB).
+    ///
+    /// Trade-off: Vision flow removed (incompatible with MUX).
+    /// Anti-DPI features (mimicry, fragment) still fully active.
     static func generateXrayConfig(from profile: VPNProfile, bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
         let encryptionField: String
         if profile.antiDPISettings.enabled && !profile.nfsPublicKey.isEmpty {
@@ -14,7 +17,7 @@ struct ConfigGenerator {
             encryptionField = "none"
         }
 
-        // Anti-DPI: fragment ClientHello — larger chunks for less memory
+        // Anti-DPI: fragment ClientHello
         let finalmask: [String: Any] = [
             "tcp": [
                 [
@@ -73,6 +76,14 @@ struct ConfigGenerator {
             ]
         ]
 
+        // MUX: multiplex all user connections through 8 transport connections.
+        // 60 user connections = 8 Go goroutines instead of 60. Saves ~20MB.
+        // Requires removing xtls-rprx-vision flow (incompatible with MUX).
+        let muxSettings: [String: Any] = [
+            "enabled": true,
+            "concurrency": 8
+        ]
+
         let config: [String: Any] = [
             "log": logConfig,
             "routing": routing,
@@ -96,7 +107,7 @@ struct ConfigGenerator {
                                 "users": [
                                     [
                                         "id": profile.uuid,
-                                        "flow": "xtls-rprx-vision",
+                                        // No flow — Vision is incompatible with MUX
                                         "encryption": encryptionField
                                     ] as [String: Any]
                                 ]
@@ -109,7 +120,7 @@ struct ConfigGenerator {
                         "realitySettings": realitySettings,
                         "finalmask": finalmask
                     ] as [String: Any],
-                    "mux": ["enabled": false, "concurrency": -1] as [String: Any]
+                    "mux": muxSettings
                 ] as [String: Any],
                 [
                     "protocol": "blackhole",

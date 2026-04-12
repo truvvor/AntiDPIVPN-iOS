@@ -167,7 +167,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 31) — optimized single-mode")
+        fileLog("Starting tunnel (build 32) — MUX enabled, optimized single-mode")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -372,7 +372,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     let path = containerURL.appendingPathComponent("Logs/\(logFile)").path
                     if let data = FileManager.default.contents(atPath: path),
                        let text = String(data: data, encoding: .utf8), !text.isEmpty {
-                        allLogs += "=== \(logFile.uppercased()) ===\n" + String(text.suffix(10000)) + "\n"
+                        let header = logFile == "xray-core.log"
+                            ? "=== \(logFile.uppercased()) (UTC) ==="
+                            : "=== \(logFile.uppercased()) ==="
+                        allLogs += header + "\n" + String(text.suffix(10000)) + "\n"
                     }
                 }
             }
