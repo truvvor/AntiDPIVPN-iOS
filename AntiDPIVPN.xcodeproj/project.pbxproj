@@ -25,6 +25,7 @@
 		DC28438AD7A7141E916681CD /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF59F610D8B8E798357D550 /* ConnectView.swift */; };
 		E9D2EDB4ADB5A8A56244807D /* ConfigGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9B6193A2DC95189BD22A913 /* ConfigGenerator.swift */; };
 		F7FDB865A701586A59A47F65 /* AntiDPIVPNApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8EA7544BF2BF50D5A91CFE /* AntiDPIVPNApp.swift */; };
+		BEB1B45CDAE644FE9B2B15DD /* GradientHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF688A143054E01B695738C /* GradientHelper.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +88,7 @@
 		CBC5F059AB01B17FF30C3615 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		EA84112D548F283CB4719759 /* ProfilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilesView.swift; sourceTree = "<group>"; };
 		FCF59F610D8B8E798357D550 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		EDF688A143054E01B695738C /* GradientHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradientHelper.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -194,6 +196,7 @@
 		FC76F579A43ECDA510C9D584 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				EDF688A143054E01B695738C /* GradientHelper.swift */,
 				BBDF4425BC33780BA288AAB2 /* AntiDPISettingsView.swift */,
 				FCF59F610D8B8E798357D550 /* ConnectView.swift */,
 				90DC8C4A1CA527A5703E67EE /* ProfileEditView.swift */,
@@ -309,6 +312,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BEB1B45CDAE644FE9B2B15DD /* GradientHelper.swift in Sources */,
 				872B36D9B34D74DFF1CC066B /* AntiDPISettings.swift in Sources */,
 				325BD3496E08C0FD5C049997 /* AntiDPISettingsView.swift in Sources */,
 				F7FDB865A701586A59A47F65 /* AntiDPIVPNApp.swift in Sources */,

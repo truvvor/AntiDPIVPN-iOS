@@ -1,8 +1,7 @@
 import NetworkExtension
 import os.log
 
-/// Build 24 — xray-core back in extension with aggressive memory management
-/// GOGC=5, GOMEMLIMIT=15MB, FreeOSMemory every 500ms
+/// PacketTunnelProvider — runs xray-core + hev-socks5-tunnel in extension process
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1

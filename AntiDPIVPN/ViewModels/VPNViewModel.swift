@@ -8,7 +8,6 @@ class VPNViewModel: ObservableObject {
     @Published var currentProfile: VPNProfile = VPNProfile()
     @Published var vpnManager: VPNManager = VPNManager()
     @Published var xrayVersion: String = "Unknown"
-    @Published var socksPort: Int = 3080
     @Published var showLogs: Bool = false
     @Published var logs: [String] = []
     @Published var adaptiveLevel: Int = 3
@@ -331,8 +330,4 @@ class VPNViewModel: ObservableObject {
         return result.isEmpty ? "No logs yet" : result
     }
 
-    func setSocksPort(_ port: Int) {
-        self.socksPort = port
-        UserDefaults.standard.set(port, forKey: "socks_port")
-    }
 }

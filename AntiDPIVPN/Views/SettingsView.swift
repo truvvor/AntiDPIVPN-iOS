@@ -7,26 +7,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1) : UIColor(red: 0.97, green: 0.97, blue: 0.99, alpha: 1) }),
-                        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.15, green: 0.11, blue: 0.15, alpha: 1) : UIColor(red: 0.95, green: 0.93, blue: 0.98, alpha: 1) })
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                LinearGradient.appBackground
                 .ignoresSafeArea()
 
                 Form {
-                    Section("Connection Settings") {
-                        HStack {
-                            Label("SOCKS Port", systemImage: "network")
-                            Spacer()
-                            TextField("Port", value: $viewModel.socksPort, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .keyboardType(.numberPad)
-                                .frame(width: 80)
-                        }
 
                         Text("Default SOCKS proxy port is 3080")
                             .font(.caption)
@@ -88,7 +72,7 @@ struct SettingsView: View {
                             Text("AntiDPI VPN")
                                 .font(.headline)
 
-                            Text("Version 1.0.0")
+                            Text("v\(Bundle.main.infoDictionary?[\"CFBundleShortVersionString\"] as? String ?? \"\") build \(Bundle.main.infoDictionary?[\"CFBundleVersion\"] as? String ?? \"\")")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
@@ -117,14 +101,7 @@ struct LogsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1) : UIColor(red: 0.97, green: 0.97, blue: 0.99, alpha: 1) }),
-                        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.15, green: 0.11, blue: 0.15, alpha: 1) : UIColor(red: 0.95, green: 0.93, blue: 0.98, alpha: 1) })
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                LinearGradient.appBackground
                 .ignoresSafeArea()
 
                 if viewModel.allLogs.isEmpty {
