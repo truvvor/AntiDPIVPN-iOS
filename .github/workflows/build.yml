@@ -5,15 +5,12 @@ on:
     branches: [main, 'claude/**']
   workflow_dispatch:
 
-# Required GitHub Secrets:
-#   BUILD_CERTIFICATE_BASE64     - Base64 of Distribution P12 certificate
-#   P12_PASSWORD                 - P12 password
-#   MAIN_PROVISION_PROFILE_BASE64   - Base64 of App Store provisioning profile (main app)
-#   TUNNEL_PROVISION_PROFILE_BASE64 - Base64 of App Store provisioning profile (tunnel extension)
-#   KEYCHAIN_PASSWORD            - Temporary keychain password (any value)
-#   ASC_KEY_ID                   - App Store Connect API Key ID
-#   ASC_ISSUER_ID                - App Store Connect Issuer ID
-#   ASC_KEY_BASE64               - Base64 of AuthKey_<ID>.p8
+# Required GitHub Secrets (for TestFlight upload only):
+#   ASC_KEY_ID      - App Store Connect API Key ID
+#   ASC_ISSUER_ID   - App Store Connect Issuer ID
+#   ASC_KEY_BASE64  - Base64 of AuthKey_<ID>.p8
+#
+# Signing certs & profiles are pre-installed on the self-hosted runner.
 
 jobs:
   build:
@@ -35,63 +32,6 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Install signing certificate
-        env:
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          MAIN_PROVISION_PROFILE_BASE64: ${{ secrets.MAIN_PROVISION_PROFILE_BASE64 }}
-          TUNNEL_PROVISION_PROFILE_BASE64: ${{ secrets.TUNNEL_PROVISION_PROFILE_BASE64 }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
-          MAIN_PP_PATH=$RUNNER_TEMP/main_pp.mobileprovision
-          TUNNEL_PP_PATH=$RUNNER_TEMP/tunnel_pp.mobileprovision
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-
-          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
-          echo -n "$MAIN_PROVISION_PROFILE_BASE64" | base64 --decode -o $MAIN_PP_PATH
-          echo -n "$TUNNEL_PROVISION_PROFILE_BASE64" | base64 --decode -o $TUNNEL_PP_PATH
-
-          # Create and configure keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-          # Download ALL Apple CA certs (G2 for older certs, G3 for newer)
-          curl -sL https://www.apple.com/certificateauthority/AppleWWDRCAG2.cer -o /tmp/AppleWWDRCAG2.cer
-          curl -sL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o /tmp/AppleWWDRCAG3.cer
-          curl -sL https://www.apple.com/certificateauthority/AppleRootCA-G2.cer -o /tmp/AppleRootCA-G2.cer
-          curl -sL https://www.apple.com/certificateauthority/AppleRootCA-G3.cer -o /tmp/AppleRootCA-G3.cer
-
-          # Import Apple CA certs FIRST (chain must exist before importing dev cert)
-          security import /tmp/AppleRootCA-G2.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
-          security import /tmp/AppleRootCA-G3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
-          security import /tmp/AppleWWDRCAG2.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
-          security import /tmp/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign || true
-
-          # Import signing certificate
-          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-
-          # Set partition list for codesign access
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-          # Add our keychain to search list (keep login keychain too)
-          security list-keychain -d user -s $KEYCHAIN_PATH $(security list-keychain -d user | tr -d '"')
-
-          # Install provisioning profiles with UUID-based names
-          MAIN_UUID=$(security cms -D -i $MAIN_PP_PATH 2>/dev/null | plutil -extract UUID raw -)
-          TUNNEL_UUID=$(security cms -D -i $TUNNEL_PP_PATH 2>/dev/null | plutil -extract UUID raw -)
-          echo "Main profile UUID: $MAIN_UUID"
-          echo "Tunnel profile UUID: $TUNNEL_UUID"
-
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp $MAIN_PP_PATH "$HOME/Library/MobileDevice/Provisioning Profiles/$MAIN_UUID.mobileprovision"
-          cp $TUNNEL_PP_PATH "$HOME/Library/MobileDevice/Provisioning Profiles/$TUNNEL_UUID.mobileprovision"
-
-          # Save profile UUIDs for later steps
-          echo "MAIN_PP_UUID=$MAIN_UUID" >> $GITHUB_ENV
-          echo "TUNNEL_PP_UUID=$TUNNEL_UUID" >> $GITHUB_ENV
-
       - name: Build archive
         run: |
           xcodebuild archive \
@@ -101,7 +41,9 @@ jobs:
             -configuration Release \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -destination "generic/platform=iOS" \
-            CODE_SIGNING_ALLOWED=YES
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=WJWU38ALPB \
+            -allowProvisioningUpdates
 
       - name: Setup App Store Connect API key
         env:
@@ -128,14 +70,7 @@ jobs:
               <key>destination</key>
               <string>upload</string>
               <key>signingStyle</key>
-              <string>manual</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>com.truvvor.secureconnect</key>
-                  <string>${MAIN_PP_UUID}</string>
-                  <key>com.truvvor.secureconnect.tunnel</key>
-                  <string>${TUNNEL_PP_UUID}</string>
-              </dict>
+              <string>automatic</string>
           </dict>
           </plist>
           PLIST
@@ -149,19 +84,15 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
-          echo "Successfully uploaded to TestFlight!"
+          echo "Successfully exported and uploaded to TestFlight!"
 
       - name: Upload IPA artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: AntiDPIVPN-build-${{ github.run_number }}
-          path: |
-            ${{ runner.temp }}/export/*.ipa
-            ${{ runner.temp }}/AntiDPIVPN.xcarchive
+          path: ${{ runner.temp }}/export/*.ipa
 
       - name: Cleanup
         if: always()
-        run: |
-          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
-          rm -f ~/private_keys/AuthKey_*.p8 2>/dev/null || true
+        run: rm -f ~/private_keys/AuthKey_*.p8 2>/dev/null || true
