@@ -248,24 +248,17 @@ class VPNViewModel: ObservableObject {
             debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
         }
 
-        // Full config — all anti-DPI at max, runs in main app (unlimited memory)
-        guard let fullConfig = ConfigGenerator.generateFullXrayConfig(
+        guard let config = ConfigGenerator.generateXrayConfig(
             from: currentProfile, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
         ) else {
-            addLog("Failed to generate full Xray config")
-            return
-        }
-
-        // Lite config — reduced mimicry, runs in extension fallback (~50MB limit)
-        guard let liteConfig = ConfigGenerator.generateLiteXrayConfig(from: currentProfile) else {
-            addLog("Failed to generate lite Xray config")
+            addLog("Failed to generate Xray config")
             return
         }
 
         let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s (\(bandwidth / 1024) MB/s)" : "unlimited"
         addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort) [bw=\(bwStr)]...")
 
-        vpnManager.connect(profile: currentProfile, fullConfigJSON: fullConfig, liteConfigJSON: liteConfig)
+        vpnManager.connect(profile: currentProfile, configJSON: config)
     }
 
     func disconnectVPN() {

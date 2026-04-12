@@ -1,67 +1,12 @@
 import Foundation
 
 struct ConfigGenerator {
-    // Ports: app-side xray uses 3080, extension fallback uses 3081
-    static let appXrayPort = 3080
-    static let fallbackXrayPort = 3081
-
-    /// Full xray config — all anti-DPI features at maximum strength.
-    /// Runs in the main app process which has no memory limit.
-    static func generateFullXrayConfig(from profile: VPNProfile, bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
-        return buildConfig(
-            from: profile,
-            socksPort: appXrayPort,
-            mimicry: [
-                "profile": "webrtc_zoom",
-                "autoRotate": true,
-                "rotateAfter": 60,
-                "sensitivity": 0.5
-            ],
-            fragment: [
-                "packets": "tlshello",
-                "length": "20-40",
-                "delay": "50-100"
-            ],
-            logLevel: "warning",
-            debugLogPath: debugLogPath,
-            bandwidthKBs: bandwidthKBs
-        )
-    }
-
-    /// Lite xray config — functional anti-DPI with reduced memory footprint.
-    /// Used as fallback when extension must run its own xray (~50MB limit).
-    static func generateLiteXrayConfig(from profile: VPNProfile) -> String? {
-        return buildConfig(
-            from: profile,
-            socksPort: fallbackXrayPort,
-            mimicry: [
-                "profile": "webrtc_zoom",
-                "autoRotate": true,
-                "rotateAfter": 300,
-                "sensitivity": 0.12
-            ],
-            fragment: [
-                "packets": "tlshello",
-                "length": "150-250",
-                "delay": "50-100"
-            ],
-            logLevel: "error",
-            debugLogPath: nil,
-            bandwidthKBs: 0
-        )
-    }
-
-    // MARK: - Private
-
-    private static func buildConfig(
-        from profile: VPNProfile,
-        socksPort: Int,
-        mimicry: [String: Any],
-        fragment: [String: Any],
-        logLevel: String,
-        debugLogPath: String?,
-        bandwidthKBs: Int
-    ) -> String? {
+    /// Generate xray JSON config optimized for Network Extension (~50MB limit).
+    /// All anti-DPI features preserved but tuned for low memory:
+    /// - mimicry sensitivity 0.12 (~8× fewer fake writes vs 0.5)
+    /// - fragment length 150-250 (~5× fewer fragments vs 20-40)
+    /// - rotateAfter 300s (less churn vs 60s)
+    static func generateXrayConfig(from profile: VPNProfile, bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
         let encryptionField: String
         if profile.antiDPISettings.enabled && !profile.nfsPublicKey.isEmpty {
             encryptionField = "mlkem768x25519plus.native.0rtt.\(profile.nfsPublicKey)"
@@ -69,13 +14,26 @@ struct ConfigGenerator {
             encryptionField = "none"
         }
 
+        // Anti-DPI: fragment ClientHello — larger chunks for less memory
         let finalmask: [String: Any] = [
             "tcp": [
                 [
                     "type": "fragment",
-                    "settings": fragment
+                    "settings": [
+                        "packets": "tlshello",
+                        "length": "150-250",
+                        "delay": "50-100"
+                    ] as [String: Any]
                 ] as [String: Any]
             ]
+        ]
+
+        // Traffic mimicry — low sensitivity for memory efficiency
+        let mimicry: [String: Any] = [
+            "profile": "webrtc_zoom",
+            "autoRotate": true,
+            "rotateAfter": 300,
+            "sensitivity": 0.12
         ]
 
         var realitySettings: [String: Any] = [
@@ -96,7 +54,7 @@ struct ConfigGenerator {
             realitySettings["debugLogPath"] = logPath
         }
 
-        var logConfig: [String: Any] = ["loglevel": logLevel]
+        var logConfig: [String: Any] = ["loglevel": "warning"]
         if let logPath = debugLogPath {
             let xrayLogPath = (logPath as NSString).deletingLastPathComponent + "/xray-core.log"
             logConfig["access"] = xrayLogPath
@@ -121,7 +79,7 @@ struct ConfigGenerator {
             "inbounds": [
                 [
                     "listen": "127.0.0.1",
-                    "port": socksPort,
+                    "port": 3080,
                     "protocol": "socks",
                     "settings": ["udp": true]
                 ] as [String: Any]
