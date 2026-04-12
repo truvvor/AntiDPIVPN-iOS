@@ -89,23 +89,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func startMemoryMonitor() {
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timer.schedule(deadline: .now() + 5, repeating: 15)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
             self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) drop=\(self.packetsDropped)")
 
-            // Graduated memory pressure — throttle inbound, never block outbound
+            // Graduated memory pressure — only throttle inbound, never block outbound
+            // Thresholds tuned based on real data: Go stabilizes at avail ~20-23MB
             let oldLevel = self.memoryPressureLevel
-            if m.avail < 12.0 && m.avail > 0 {
-                self.memoryPressureLevel = 2 // severe: drop 90% inbound
-            } else if m.avail < 20.0 && m.avail > 0 {
-                self.memoryPressureLevel = 1 // moderate: drop 50% inbound
-            } else if m.avail > 25.0 {
+            if m.avail < 10.0 && m.avail > 0 {
+                self.memoryPressureLevel = 2 // severe: drop 75% inbound
+            } else if m.avail < 15.0 && m.avail > 0 {
+                self.memoryPressureLevel = 1 // light: drop 25% inbound
+            } else if m.avail > 18.0 {
                 self.memoryPressureLevel = 0 // normal
             }
             if oldLevel != self.memoryPressureLevel {
-                let desc = ["normal", "moderate(drop 50% inbound)", "severe(drop 90% inbound)"]
+                let desc = ["normal", "light(drop 25% inbound)", "severe(drop 75% inbound)"]
                 self.fileLog("Memory pressure: \(desc[self.memoryPressureLevel]) avail=\(String(format: "%.1f", m.avail))MB")
             }
         }
@@ -166,7 +167,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 30) — optimized single-mode")
+        fileLog("Starting tunnel (build 31) — optimized single-mode")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -320,15 +321,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 let n = read(self.appSideFd, buf, self.readBufSize)
                 if n <= 4 { break }
 
-                // Graduated inbound throttle — keeps connections alive but reduces data flow
+                // Light inbound throttle — barely noticeable but prevents OOM
                 let pressure = self.memoryPressureLevel
                 if pressure > 0 {
                     self.dropCounter += 1
                     let shouldDrop: Bool
                     if pressure >= 2 {
-                        shouldDrop = (self.dropCounter % 10) != 0 // keep 1 in 10
+                        shouldDrop = (self.dropCounter % 4) != 0 // keep 1 in 4 (drop 75%)
                     } else {
-                        shouldDrop = (self.dropCounter % 2) != 0  // keep 1 in 2
+                        shouldDrop = (self.dropCounter % 4) == 0 // keep 3 in 4 (drop 25%)
                     }
                     if shouldDrop {
                         self.packetsDropped += 1
