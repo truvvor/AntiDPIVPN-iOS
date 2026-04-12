@@ -11,11 +11,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        run: |
+          # Manual checkout for self-hosted runner (avoids Node.js version issues)
+          cd $GITHUB_WORKSPACE
+          if [ -d .git ]; then
+            git fetch origin $GITHUB_REF
+            git checkout -f FETCH_HEAD
+            git clean -ffd
+          else
+            git clone --depth 1 --branch ${GITHUB_REF#refs/heads/} https://github.com/$GITHUB_REPOSITORY.git .
+          fi
+          echo "Checked out $(git rev-parse --short HEAD)"
 
       - name: Build and Upload
-        env:
-          RUNNER_TEMP: ${{ runner.temp }}
         run: |
           set -e
 
@@ -60,4 +68,3 @@ jobs:
           rm -rf ${{ runner.temp }}/AntiDPIVPN.xcarchive
           rm -rf ${{ runner.temp }}/export
           rm -f ${{ runner.temp }}/ExportOptions.plist
-# CI trigger Sun Apr 12 13:52:34 PDT 2026
