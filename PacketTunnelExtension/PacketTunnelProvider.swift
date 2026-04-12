@@ -167,7 +167,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 32) — MUX enabled, optimized single-mode")
+        fileLog("Starting tunnel (build 33) — Vision restored, optimized single-mode")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,

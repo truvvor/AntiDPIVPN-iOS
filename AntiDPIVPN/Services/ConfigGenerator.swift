@@ -3,12 +3,11 @@ import Foundation
 struct ConfigGenerator {
     /// Generate xray JSON config optimized for Network Extension (~50MB limit).
     ///
-    /// Key memory optimization: MUX enabled with concurrency=8.
-    /// Instead of 60-90 separate Go goroutines/connections (~65MB),
-    /// all traffic multiplexed through 8 transport connections (~45MB).
-    ///
-    /// Trade-off: Vision flow removed (incompatible with MUX).
-    /// Anti-DPI features (mimicry, fragment) still fully active.
+    /// Anti-DPI features preserved but tuned for low memory:
+    /// - mimicry sensitivity 0.12 (~8× fewer fake writes vs 0.5)
+    /// - fragment length 150-250 (~5× fewer fragments vs 20-40)
+    /// - rotateAfter 300s (less churn vs 60s)
+    /// Vision flow required by server — MUX incompatible with Vision.
     static func generateXrayConfig(from profile: VPNProfile, bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
         let encryptionField: String
         if profile.antiDPISettings.enabled && !profile.nfsPublicKey.isEmpty {
@@ -76,12 +75,11 @@ struct ConfigGenerator {
             ]
         ]
 
-        // MUX: multiplex all user connections through 8 transport connections.
-        // 60 user connections = 8 Go goroutines instead of 60. Saves ~20MB.
-        // Requires removing xtls-rprx-vision flow (incompatible with MUX).
+        // MUX disabled — incompatible with xtls-rprx-vision flow.
+        // Vision is required by the server for REALITY to work.
         let muxSettings: [String: Any] = [
-            "enabled": true,
-            "concurrency": 8
+            "enabled": false,
+            "concurrency": -1
         ]
 
         let config: [String: Any] = [
@@ -107,7 +105,7 @@ struct ConfigGenerator {
                                 "users": [
                                     [
                                         "id": profile.uuid,
-                                        // No flow — Vision is incompatible with MUX
+                                        "flow": "xtls-rprx-vision",
                                         "encryption": encryptionField
                                     ] as [String: Any]
                                 ]
