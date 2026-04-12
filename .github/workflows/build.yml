@@ -13,26 +13,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Keychain
+      - name: Build and Upload
         run: |
-          # Add login keychain to search list (runner service drops it)
+          set -e
+
+          # Keychain setup - must be in same shell as codesign
           security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
-          # Unlock it
           security unlock-keychain -p 'rentamac' ~/Library/Keychains/login.keychain-db
-          # Allow codesign access without GUI prompt
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k 'rentamac' ~/Library/Keychains/login.keychain-db
-          # Keep unlocked for 1 hour
-          security set-keychain-settings -t 3600 ~/Library/Keychains/login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k 'rentamac' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1
+          security set-keychain-settings -lut 21600 ~/Library/Keychains/login.keychain-db
           echo "=== Signing identities ==="
           security find-identity -v -p codesigning
 
-      - name: Copy frameworks
-        run: |
-          # LibXray and HevSocks5Tunnel are in the repo root
-          ls -la LibXray.xcframework/ HevSocks5Tunnel.xcframework/ 2>/dev/null || echo "Frameworks check"
-
-      - name: Archive
-        run: |
+          # Archive
           xcodebuild -scheme AntiDPIVPN \
             -sdk iphoneos \
             -configuration Release \
@@ -42,8 +35,7 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=WJWU38ALPB
 
-      - name: Export IPA
-        run: |
+          # Export
           cat > $RUNNER_TEMP/ExportOptions.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -59,15 +51,14 @@ jobs:
             <string>WJWU38ALPB</string>
           </dict>
           </plist>
-          PLIST
+PLIST
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -exportPath $RUNNER_TEMP/export \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
             -allowProvisioningUpdates
 
-      - name: Upload to TestFlight
-        run: |
+          # Upload
           xcrun altool --upload-app \
             -f $RUNNER_TEMP/export/AntiDPIVPN.ipa \
             -t ios \
