@@ -25,8 +25,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private static let afInet4Header = Data([0, 0, 0, 2])
     private static let afInet6Header = Data([0, 0, 0, 30])
 
-    // Memory pressure level: 0=normal, 1=moderate(drop 50% inbound), 2=severe(drop 90% inbound)
-    // NEVER drop outbound — apps must be able to close connections (FIN/RST) so Go can free memory
+    // Stall watchdog
+    private var lastActivePackets: UInt64 = 0
+    private var stallSeconds: Int = 0
     private var memoryPressureLevel: Int = 0
     private var dropCounter: UInt64 = 0
 
@@ -109,12 +110,54 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 let desc = ["normal", "light(drop 25% inbound)", "severe(drop 75% inbound)"]
                 self.fileLog("Memory pressure: \(desc[self.memoryPressureLevel]) avail=\(String(format: "%.1f", m.avail))MB")
             }
+
+            // Stall watchdog: if no new packets for 30s, restart xray to recover
+            let currentTotal = self.packetsSent + self.packetsRecv
+            if currentTotal == self.lastActivePackets && currentTotal > 0 {
+                self.stallSeconds += 5
+                if self.stallSeconds >= 30 {
+                    self.fileLog("STALL detected: no traffic for 30s — restarting xray")
+                    self.restartXray()
+                    self.stallSeconds = 0
+                }
+            } else {
+                self.stallSeconds = 0
+                self.lastActivePackets = currentTotal
+            }
         }
         memoryTimer = timer
         timer.resume()
     }
 
     // MARK: - Xray
+
+    /// Restart xray in-place to recover from stalled connections.
+    /// Stops xray, waits briefly, starts it again with the saved config.
+    private var savedConfigJSON: String = ""
+
+    private func restartXray() {
+        guard !savedConfigJSON.isEmpty else {
+            fileLog("Cannot restart xray: no saved config")
+            return
+        }
+        let m0 = getMemoryMB()
+        fileLog("Restarting xray — MEM: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
+
+        // Stop current xray (clears all Go connections and memory)
+        _ = LibXrayStopXray()
+        usleep(500_000) // 500ms for Go runtime to release memory
+
+        let m1 = getMemoryMB()
+        fileLog("Xray stopped — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+
+        // Start fresh xray
+        if startXray(configJSON: savedConfigJSON) {
+            let m2 = getMemoryMB()
+            fileLog("Xray restarted OK — MEM: used=\(String(format: "%.1f", m2.used))MB avail=\(String(format: "%.1f", m2.avail))MB")
+        } else {
+            fileLog("ERROR: xray restart failed!")
+        }
+    }
 
     private func startXray(configJSON: String) -> Bool {
         guard let containerURL = sharedContainerURL else {
@@ -167,7 +210,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 33) — Vision restored, optimized single-mode")
+        fileLog("Starting tunnel (build 34) — stall watchdog added")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -180,7 +223,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let serverAddress = providerConfig["serverAddress"] as? String ?? ""
         fileLog("configJSON length=\(configJSON.count) server=\(serverAddress)")
 
-        // Start xray-core
+        // Start xray-core (save config for potential restart)
+        savedConfigJSON = configJSON
         guard startXray(configJSON: configJSON) else {
             completionHandler(NSError(domain: "PTP", code: -3, userInfo: [NSLocalizedDescriptionKey: "Xray failed to start"]))
             return
