@@ -11,7 +11,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git init 2>/dev/null || true
+          git remote set-url origin "https://github.com/$GITHUB_REPOSITORY.git" 2>/dev/null || git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --depth 1 origin "$GITHUB_SHA"
+          git checkout -f "$GITHUB_SHA"
+          echo "Checked out $(git rev-parse --short HEAD) on $GITHUB_REF"
 
       - name: Build and Upload
         run: |
