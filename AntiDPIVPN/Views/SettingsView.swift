@@ -4,19 +4,19 @@ struct SettingsView: View {
     @EnvironmentObject var viewModel: VPNViewModel
     @State private var showLogs = false
 
+    private var appVersion: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "v\(v) build \(b)"
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 LinearGradient.appBackground
-                .ignoresSafeArea()
+                    .ignoresSafeArea()
 
                 Form {
-
-                        Text("Default SOCKS proxy port is 3080")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
                     Section("Xray Information") {
                         HStack {
                             Label("Version", systemImage: "info.circle")
@@ -46,9 +46,7 @@ struct SettingsView: View {
                             .foregroundColor(.primary)
                         }
 
-                        Button(action: {
-                            viewModel.clearLogs()
-                        }) {
+                        Button(action: { viewModel.clearLogs() }) {
                             Label("Clear Logs", systemImage: "trash.fill")
                                 .foregroundColor(.red)
                         }
@@ -72,7 +70,7 @@ struct SettingsView: View {
                             Text("AntiDPI VPN")
                                 .font(.headline)
 
-                            Text("v\(Bundle.main.infoDictionary?[\"CFBundleShortVersionString\"] as? String ?? \"\") build \(Bundle.main.infoDictionary?[\"CFBundleVersion\"] as? String ?? \"\")")
+                            Text(appVersion)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
@@ -102,17 +100,15 @@ struct LogsView: View {
         NavigationStack {
             ZStack {
                 LinearGradient.appBackground
-                .ignoresSafeArea()
+                    .ignoresSafeArea()
 
                 if viewModel.allLogs.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "terminal")
                             .font(.system(size: 44))
                             .foregroundColor(.secondary)
-
                         Text("No Logs")
                             .font(.headline)
-
                         Text("VPN events will appear here")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -120,13 +116,10 @@ struct LogsView: View {
                 } else {
                     List {
                         ForEach(viewModel.allLogs, id: \.self) { log in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(log)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .lineLimit(nil)
-                                    .foregroundColor(.primary)
-                            }
-                            .padding(.vertical, 4)
+                            Text(log)
+                                .font(.system(.caption, design: .monospaced))
+                                .lineLimit(nil)
+                                .padding(.vertical, 4)
                         }
                     }
                     .listStyle(.insetGrouped)
@@ -137,9 +130,7 @@ struct LogsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                    Button("Done") { dismiss() }
                 }
             }
         }
@@ -148,13 +139,12 @@ struct LogsView: View {
 
 struct TunnelDebugLogsView: View {
     @EnvironmentObject var viewModel: VPNViewModel
-    @State private var logText: String = "Loading..."
+    @State private var logText = "Loading..."
     @State private var isLoading = false
 
     var body: some View {
         ZStack {
             Color(UIColor.systemBackground).ignoresSafeArea()
-
             ScrollView {
                 Text(logText)
                     .font(.system(.caption2, design: .monospaced))
@@ -171,7 +161,6 @@ struct TunnelDebugLogsView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .disabled(isLoading)
-
                     ShareLink(item: logText) {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -183,15 +172,12 @@ struct TunnelDebugLogsView: View {
 
     private func refreshLogs() {
         isLoading = true
-        // Try reading from shared container first
         let sharedLogs = viewModel.readSharedLogs()
         if sharedLogs != "No logs yet" {
             logText = sharedLogs
             isLoading = false
             return
         }
-
-        // Fallback: try via tunnel message
         viewModel.fetchTunnelLogs { result in
             DispatchQueue.main.async {
                 logText = result
