@@ -60,3 +60,4 @@ jobs:
           rm -rf ${{ runner.temp }}/AntiDPIVPN.xcarchive
           rm -rf ${{ runner.temp }}/export
           rm -f ${{ runner.temp }}/ExportOptions.plist
+# CI trigger Sun Apr 12 13:52:34 PDT 2026
