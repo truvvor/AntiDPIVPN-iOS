@@ -11,17 +11,7 @@ jobs:
 
     steps:
       - name: Checkout
-        run: |
-          # Manual checkout for self-hosted runner (avoids Node.js version issues)
-          cd $GITHUB_WORKSPACE
-          if [ -d .git ]; then
-            git fetch origin $GITHUB_REF
-            git checkout -f FETCH_HEAD
-            git clean -ffd
-          else
-            git clone --depth 1 --branch ${GITHUB_REF#refs/heads/} https://github.com/$GITHUB_REPOSITORY.git .
-          fi
-          echo "Checked out $(git rev-parse --short HEAD)"
+        uses: actions/checkout@v4
 
       - name: Build and Upload
         run: |
