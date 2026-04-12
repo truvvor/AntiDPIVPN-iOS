@@ -71,7 +71,7 @@ jobs:
           xcrun altool --upload-app \
             -f $RUNNER_TEMP/export/AntiDPIVPN.ipa \
             -t ios \
-            --apiKey ZYQ7S822HR \
+            --apiKey 4RA5988Z6S \
             --apiIssuer e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc
 
       - name: Cleanup
