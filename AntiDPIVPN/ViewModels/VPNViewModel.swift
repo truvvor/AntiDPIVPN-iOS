@@ -239,7 +239,7 @@ class VPNViewModel: ObservableObject {
             addLog("Downloading geo data for routing rules...")
             geoMgr.ensureGeoData(progress: { [weak self] msg in
                 self?.addLog(msg)
-            }) { [weak self] error in
+            }) { [weak self] (error: Error?) in
                 guard let self = self else { return }
                 if let error = error {
                     self.addLog("Geo data download failed: \(error.localizedDescription)")
