@@ -25,8 +25,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private static let afInet4Header = Data([0, 0, 0, 2])
     private static let afInet6Header = Data([0, 0, 0, 30])
 
-    // Memory pressure flag
-    private var isUnderMemoryPressure = false
+    // Memory pressure level: 0=normal, 1=moderate(drop 50% inbound), 2=severe(drop 90% inbound)
+    // NEVER drop outbound — apps must be able to close connections (FIN/RST) so Go can free memory
+    private var memoryPressureLevel: Int = 0
+    private var dropCounter: UInt64 = 0
 
     // Logging
     private var logFileHandle: FileHandle?
@@ -93,14 +95,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let m = self.getMemoryMB()
             self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) drop=\(self.packetsDropped)")
 
-            if m.avail < 15.0 && m.avail > 0 {
-                if !self.isUnderMemoryPressure {
-                    self.fileLog("WARNING: memory pressure (avail=\(String(format: "%.1f", m.avail))MB)")
-                    self.isUnderMemoryPressure = true
-                }
-            } else if m.avail > 20.0 && self.isUnderMemoryPressure {
-                self.fileLog("Memory pressure relieved")
-                self.isUnderMemoryPressure = false
+            // Graduated memory pressure — throttle inbound, never block outbound
+            let oldLevel = self.memoryPressureLevel
+            if m.avail < 12.0 && m.avail > 0 {
+                self.memoryPressureLevel = 2 // severe: drop 90% inbound
+            } else if m.avail < 20.0 && m.avail > 0 {
+                self.memoryPressureLevel = 1 // moderate: drop 50% inbound
+            } else if m.avail > 25.0 {
+                self.memoryPressureLevel = 0 // normal
+            }
+            if oldLevel != self.memoryPressureLevel {
+                let desc = ["normal", "moderate(drop 50% inbound)", "severe(drop 90% inbound)"]
+                self.fileLog("Memory pressure: \(desc[self.memoryPressureLevel]) avail=\(String(format: "%.1f", m.avail))MB")
             }
         }
         memoryTimer = timer
@@ -160,7 +166,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 29) — optimized single-mode")
+        fileLog("Starting tunnel (build 30) — optimized single-mode")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -272,17 +278,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// packetFlow → tun2socks
+    /// packetFlow → tun2socks (outbound: NEVER drop — apps must close connections)
     private func startReadingFromPacketFlow() {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self = self, self.isRelayRunning else { return }
 
-            if self.isUnderMemoryPressure {
-                self.packetsDropped += UInt64(packets.count)
-                self.startReadingFromPacketFlow()
-                return
-            }
-
+            // ALWAYS forward outbound packets — connection teardown (FIN/RST)
+            // must work so xray can close connections and free Go memory
             for (i, packet) in packets.enumerated() {
                 let protoNum = protocols[i] as! Int32
                 let afHeader = (protoNum == AF_INET6) ? Self.afInet6Header : Self.afInet4Header
@@ -305,7 +307,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// tun2socks → packetFlow
+    /// tun2socks → packetFlow (inbound: graduated dropping under memory pressure)
     private func startReadingFromTun2Socks() {
         let source = DispatchSource.makeReadSource(fileDescriptor: appSideFd, queue: DispatchQueue.global(qos: .userInitiated))
         source.setEventHandler { [weak self] in
@@ -318,9 +320,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 let n = read(self.appSideFd, buf, self.readBufSize)
                 if n <= 4 { break }
 
-                if self.isUnderMemoryPressure {
-                    self.packetsDropped += 1
-                    continue
+                // Graduated inbound throttle — keeps connections alive but reduces data flow
+                let pressure = self.memoryPressureLevel
+                if pressure > 0 {
+                    self.dropCounter += 1
+                    let shouldDrop: Bool
+                    if pressure >= 2 {
+                        shouldDrop = (self.dropCounter % 10) != 0 // keep 1 in 10
+                    } else {
+                        shouldDrop = (self.dropCounter % 2) != 0  // keep 1 in 2
+                    }
+                    if shouldDrop {
+                        self.packetsDropped += 1
+                        continue
+                    }
                 }
 
                 let af = UInt32(buf[0]) << 24 | UInt32(buf[1]) << 16 | UInt32(buf[2]) << 8 | UInt32(buf[3])
