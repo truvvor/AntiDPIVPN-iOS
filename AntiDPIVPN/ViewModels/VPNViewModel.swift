@@ -233,15 +233,39 @@ class VPNViewModel: ObservableObject {
             return
         }
 
-        guard let config = ConfigGenerator.generateXrayConfig(from: currentProfile) else {
-            addLog("Failed to generate Xray config")
+        // Determine bandwidth for adaptive anti-DPI
+        let bandwidth: Int
+        if currentProfile.antiDPISettings.adaptiveEnabled {
+            bandwidth = currentBandwidthKBs
+        } else {
+            bandwidth = currentProfile.antiDPISettings.bandwidthLimitKBs
+        }
+
+        var debugLogPath: String? = nil
+        if let containerURL = sharedContainerURL {
+            let logsDir = containerURL.appendingPathComponent("Logs")
+            try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+            debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
+        }
+
+        // Full config — all anti-DPI at max, runs in main app (unlimited memory)
+        guard let fullConfig = ConfigGenerator.generateFullXrayConfig(
+            from: currentProfile, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
+        ) else {
+            addLog("Failed to generate full Xray config")
             return
         }
 
-        addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort)...")
+        // Lite config — reduced mimicry, runs in extension fallback (~50MB limit)
+        guard let liteConfig = ConfigGenerator.generateLiteXrayConfig(from: currentProfile) else {
+            addLog("Failed to generate lite Xray config")
+            return
+        }
 
-        // Pass configJSON to extension — xray runs IN the extension
-        vpnManager.connect(profile: currentProfile, configJSON: config)
+        let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s (\(bandwidth / 1024) MB/s)" : "unlimited"
+        addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort) [bw=\(bwStr)]...")
+
+        vpnManager.connect(profile: currentProfile, fullConfigJSON: fullConfig, liteConfigJSON: liteConfig)
     }
 
     func disconnectVPN() {
