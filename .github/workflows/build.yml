@@ -1,98 +1,62 @@
-name: Build & Deploy to TestFlight
+name: Build & Upload to TestFlight
 
 on:
   push:
-    branches: [main, 'claude/**']
+    branches: [main, claude/reduce-memory-usage-BwFrG]
   workflow_dispatch:
-
-# Required GitHub Secrets (for TestFlight upload only):
-#   ASC_KEY_ID      - App Store Connect API Key ID
-#   ASC_ISSUER_ID   - App Store Connect Issuer ID
-#   ASC_KEY_BASE64  - Base64 of AuthKey_<ID>.p8
-#
-# Signing certs & profiles are pre-installed on the self-hosted runner.
 
 jobs:
   build:
-    runs-on: [self-hosted, macOS]
+    runs-on: self-hosted
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Download LibXray.xcframework
+      - name: Build and Upload
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
         run: |
-          if [ ! -d "LibXray.xcframework" ] || [ ! -d "LibXray.xcframework/ios-arm64" ]; then
-            curl -L -o LibXray.xcframework.zip \
-              https://github.com/truvvor/Xray-core/releases/download/v1.0.0-ios/LibXray.xcframework.zip
-            unzip -qo LibXray.xcframework.zip
-          fi
+          set -e
 
-      - name: Install XcodeGen
-        run: which xcodegen || brew install xcodegen
+          # Keychain setup
+          security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
+          security unlock-keychain -p 'rentamac' ~/Library/Keychains/login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k 'rentamac' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1
+          security set-keychain-settings -lut 21600 ~/Library/Keychains/login.keychain-db
+          echo "=== Signing identities ==="
+          security find-identity -v -p codesigning
 
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: Build archive
-        run: |
-          xcodebuild archive \
-            -project AntiDPIVPN.xcodeproj \
-            -scheme AntiDPIVPN \
+          # Archive
+          xcodebuild -scheme AntiDPIVPN \
             -sdk iphoneos \
             -configuration Release \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
-            -destination "generic/platform=iOS" \
+            archive \
+            -allowProvisioningUpdates \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=WJWU38ALPB \
-            -allowProvisioningUpdates
+            DEVELOPMENT_TEAM=WJWU38ALPB
 
-      - name: Setup App Store Connect API key
-        env:
-          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-        run: |
-          mkdir -p ~/private_keys
-          echo -n "$ASC_KEY_BASE64" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          # Create ExportOptions
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>method</key>\n  <string>app-store-connect</string>\n  <key>uploadSymbols</key>\n  <false/>\n  <key>signingStyle</key>\n  <string>automatic</string>\n  <key>teamID</key>\n  <string>WJWU38ALPB</string>\n</dict>\n</plist>\n' > $RUNNER_TEMP/ExportOptions.plist
 
-      - name: Export & Upload to TestFlight
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-        run: |
-          cat > /tmp/ExportOptions.plist << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store-connect</string>
-              <key>teamID</key>
-              <string>WJWU38ALPB</string>
-              <key>destination</key>
-              <string>upload</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-          </dict>
-          </plist>
-          PLIST
-
+          # Export IPA
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -exportPath $RUNNER_TEMP/export \
-            -exportOptionsPlist /tmp/ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -allowProvisioningUpdates
 
-          echo "Successfully exported and uploaded to TestFlight!"
-
-      - name: Upload IPA artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: AntiDPIVPN-build-${{ github.run_number }}
-          path: ${{ runner.temp }}/export/*.ipa
+          # Upload to TestFlight
+          xcrun altool --upload-app \
+            -f $RUNNER_TEMP/export/AntiDPIVPN.ipa \
+            -t ios \
+            --apiKey 4RA5988Z6S \
+            --apiIssuer e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc
 
       - name: Cleanup
         if: always()
-        run: rm -f ~/private_keys/AuthKey_*.p8 2>/dev/null || true
+        run: |
+          rm -rf ${{ runner.temp }}/AntiDPIVPN.xcarchive
+          rm -rf ${{ runner.temp }}/export
+          rm -f ${{ runner.temp }}/ExportOptions.plist
