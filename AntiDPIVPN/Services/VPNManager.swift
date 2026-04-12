@@ -83,7 +83,8 @@ class VPNManager: ObservableObject {
 
         proto.providerConfiguration = [
             "configJSON": configJSON,
-            "serverAddress": profile.serverAddress
+            "serverAddress": profile.serverAddress,
+            "dnsServers": profile.effectiveDNS
         ] as [String: Any]
 
         manager.protocolConfiguration = proto

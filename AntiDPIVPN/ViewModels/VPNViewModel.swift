@@ -233,7 +233,28 @@ class VPNViewModel: ObservableObject {
             return
         }
 
-        // Determine bandwidth for adaptive anti-DPI
+        // If routing uses geosite/geoip, ensure geo data files are downloaded first
+        let geoMgr = GeoDataManager.shared
+        if geoMgr.needsGeoData(for: currentProfile.routeConfig) && !geoMgr.hasGeoData {
+            addLog("Downloading geo data for routing rules...")
+            geoMgr.ensureGeoData(progress: { [weak self] msg in
+                self?.addLog(msg)
+            }) { [weak self] error in
+                guard let self = self else { return }
+                if let error = error {
+                    self.addLog("Geo data download failed: \(error.localizedDescription)")
+                    DispatchQueue.main.async { self.vpnManager.errorMessage = "Failed to download geo data: \(error.localizedDescription)" }
+                    return
+                }
+                self.addLog("Geo data ready")
+                self.doConnect()
+            }
+        } else {
+            doConnect()
+        }
+    }
+
+    private func doConnect() {
         let bandwidth: Int
         if currentProfile.antiDPISettings.adaptiveEnabled {
             bandwidth = currentBandwidthKBs
@@ -255,8 +276,10 @@ class VPNViewModel: ObservableObject {
             return
         }
 
-        let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s (\(bandwidth / 1024) MB/s)" : "unlimited"
-        addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort) [bw=\(bwStr)]...")
+        let routeInfo = currentProfile.routeConfig.isEmpty ? "no routing" : "\(currentProfile.routeConfig.rules.count) rules"
+        let dnsInfo = currentProfile.dnsServers.isEmpty ? "default DNS" : currentProfile.effectiveDNS.joined(separator: ", ")
+        let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s" : "unlimited"
+        addLog("Connecting [\(routeInfo), \(dnsInfo), bw=\(bwStr)]...")
 
         vpnManager.connect(profile: currentProfile, configJSON: config)
     }

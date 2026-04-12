@@ -148,7 +148,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 36) — no throttle, trust iOS")
+        fileLog("Starting tunnel (build 37) — routing + custom DNS")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -159,6 +159,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let serverAddress = providerConfig["serverAddress"] as? String ?? ""
+        let dnsServers = providerConfig["dnsServers"] as? [String] ?? ["8.8.8.8", "2001:4860:4860::8888"]
         fileLog("configJSON length=\(configJSON.count) server=\(serverAddress)")
 
         guard startXray(configJSON: configJSON) else {
@@ -185,7 +186,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             ipv6.excludedRoutes = [NEIPv6Route(destinationAddress: serverAddress, networkPrefixLength: 128)]
         }
         settings.ipv6Settings = ipv6
-        settings.dnsSettings = NEDNSSettings(servers: ["8.8.8.8", "2001:4860:4860::8888"])
+        settings.dnsSettings = NEDNSSettings(servers: dnsServers)
+        fileLog("DNS: \(dnsServers.joined(separator: ", "))")
 
         setTunnelNetworkSettings(settings) { [weak self] error in
             guard let self = self else { return }
