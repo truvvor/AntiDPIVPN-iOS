@@ -233,30 +233,12 @@ class VPNViewModel: ObservableObject {
             return
         }
 
-        // Determine bandwidth: adaptive or manual
-        let bandwidth: Int
-        if currentProfile.antiDPISettings.adaptiveEnabled {
-            bandwidth = currentBandwidthKBs
-        } else {
-            bandwidth = currentProfile.antiDPISettings.bandwidthLimitKBs
-        }
-
-        var debugLogPath: String? = nil
-        if let containerURL = sharedContainerURL {
-            let logsDir = containerURL.appendingPathComponent("Logs")
-            try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
-            debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
-        }
-
-        guard let config = ConfigGenerator.generateXrayConfig(
-            from: currentProfile, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
-        ) else {
+        guard let config = ConfigGenerator.generateXrayConfig(from: currentProfile) else {
             addLog("Failed to generate Xray config")
             return
         }
 
-        let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s (\(bandwidth / 1024) MB/s)" : "unlimited"
-        addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort) [bw=\(bwStr)]...")
+        addLog("Connecting to \(currentProfile.serverAddress):\(currentProfile.serverPort)...")
 
         // Pass configJSON to extension — xray runs IN the extension
         vpnManager.connect(profile: currentProfile, configJSON: config)
