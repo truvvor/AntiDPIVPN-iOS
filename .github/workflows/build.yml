@@ -2,7 +2,7 @@ name: Build & Upload to TestFlight
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/reduce-memory-usage-BwFrG]
   workflow_dispatch:
 
 jobs:
@@ -14,10 +14,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build and Upload
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
         run: |
           set -e
 
-          # Keychain setup - must be in same shell as codesign
+          # Keychain setup
           security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
           security unlock-keychain -p 'rentamac' ~/Library/Keychains/login.keychain-db
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k 'rentamac' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1
@@ -35,30 +37,17 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=WJWU38ALPB
 
-          # Export
-          cat > $RUNNER_TEMP/ExportOptions.plist << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>uploadSymbols</key>
-            <false/>
-            <key>signingStyle</key>
-            <string>automatic</string>
-            <key>teamID</key>
-            <string>WJWU38ALPB</string>
-          </dict>
-          </plist>
-PLIST
+          # Create ExportOptions
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>method</key>\n  <string>app-store-connect</string>\n  <key>uploadSymbols</key>\n  <false/>\n  <key>signingStyle</key>\n  <string>automatic</string>\n  <key>teamID</key>\n  <string>WJWU38ALPB</string>\n</dict>\n</plist>\n' > $RUNNER_TEMP/ExportOptions.plist
+
+          # Export IPA
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -exportPath $RUNNER_TEMP/export \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
             -allowProvisioningUpdates
 
-          # Upload
+          # Upload to TestFlight
           xcrun altool --upload-app \
             -f $RUNNER_TEMP/export/AntiDPIVPN.ipa \
             -t ios \
@@ -68,6 +57,6 @@ PLIST
       - name: Cleanup
         if: always()
         run: |
-          rm -rf $RUNNER_TEMP/AntiDPIVPN.xcarchive
-          rm -rf $RUNNER_TEMP/export
-          rm -f $RUNNER_TEMP/ExportOptions.plist
+          rm -rf ${{ runner.temp }}/AntiDPIVPN.xcarchive
+          rm -rf ${{ runner.temp }}/export
+          rm -f ${{ runner.temp }}/ExportOptions.plist
