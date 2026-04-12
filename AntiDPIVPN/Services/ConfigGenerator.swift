@@ -104,7 +104,10 @@ struct ConfigGenerator {
                     "network": "tcp",
                     "security": "reality",
                     "realitySettings": realitySettings,
-                    "finalmask": finalmask
+                    "finalmask": finalmask,
+                    "sockopt": [
+                        "tcpKeepAliveInterval": 15
+                    ] as [String: Any]
                 ] as [String: Any],
                 "mux": muxSettings
             ] as [String: Any],

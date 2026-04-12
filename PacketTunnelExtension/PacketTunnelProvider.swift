@@ -148,7 +148,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 37) — routing + custom DNS")
+        fileLog("Starting tunnel (build 38) — routing, DNS, keepalive")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
