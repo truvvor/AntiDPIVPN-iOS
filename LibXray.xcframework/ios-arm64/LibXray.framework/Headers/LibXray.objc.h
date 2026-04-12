@@ -140,6 +140,12 @@ FOUNDATION_EXPORT NSString* _Nonnull LibXrayRunXray(NSString* _Nullable base64Te
 FOUNDATION_EXPORT NSString* _Nonnull LibXrayRunXrayFromJSON(NSString* _Nullable base64Text);
 
 /**
+ * SetTunFd sets the TUN file descriptor.
+Call this BEFORE RunXray/RunXrayFromJSON.
+ */
+FOUNDATION_EXPORT void LibXraySetTunFd(int32_t fd);
+
+/**
  * Stop Xray instance.
  */
 FOUNDATION_EXPORT NSString* _Nonnull LibXrayStopXray(void);

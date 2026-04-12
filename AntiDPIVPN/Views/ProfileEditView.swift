@@ -117,7 +117,7 @@ struct ProfileEditView: View {
                     }
 
                     Section {
-                        NavigationLink("Anti-DPI Settings", destination: AntiDPISettingsView(settings: $profile.antiDPISettings))
+                        NavigationLink("Anti-DPI Settings", destination: AntiDPISettingsView(settings: $profile.antiDPISettings, viewModel: viewModel))
                     }
 
                     // Share URL section for existing profiles

@@ -38,8 +38,6 @@ class VPNManager: ObservableObject {
             queue: .main
         ) { [weak self] notification in
             guard let self = self else { return }
-            // Always read status from our manager's connection, not from notification object
-            // This prevents stale connection objects from giving wrong status
             let newStatus = self.manager?.connection.status ?? .disconnected
             self.status = newStatus
             self.log("Status -> \(self.statusText)")
@@ -82,9 +80,10 @@ class VPNManager: ObservableObject {
         proto.providerBundleIdentifier = "com.truvvor.secureconnect.tunnel"
         proto.serverAddress = profile.serverAddress.isEmpty ? "VPN Server" : profile.serverAddress
         proto.disconnectOnSleep = false
+
+        // Pass configJSON to extension — xray runs IN the extension
         proto.providerConfiguration = [
             "configJSON": configJSON,
-            "socksPort": 3080,
             "serverAddress": profile.serverAddress
         ] as [String: Any]
 
@@ -102,7 +101,6 @@ class VPNManager: ObservableObject {
             }
             self.log("Save OK, reloading...")
 
-            // CRITICAL: After save, must loadAllFromPreferences to get fresh manager object
             NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
                 guard let self = self else { return }
                 if let error = error {
@@ -139,6 +137,10 @@ class VPNManager: ObservableObject {
     func disconnect() {
         log("disconnect() called")
         manager?.connection.stopVPNTunnel()
+    }
+
+    var tunnelProviderSession: NETunnelProviderSession? {
+        return manager?.connection as? NETunnelProviderSession
     }
 
     var isConnected: Bool { status == .connected }

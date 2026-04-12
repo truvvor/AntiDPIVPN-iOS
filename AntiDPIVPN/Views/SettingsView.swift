@@ -68,6 +68,19 @@ struct SettingsView: View {
                             Label("Clear Logs", systemImage: "trash.fill")
                                 .foregroundColor(.red)
                         }
+
+                        NavigationLink {
+                            TunnelDebugLogsView()
+                                .environmentObject(viewModel)
+                        } label: {
+                            HStack {
+                                Label("Tunnel Debug Logs", systemImage: "ant.fill")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.secondary)
+                            }
+                            .foregroundColor(.primary)
+                        }
                     }
 
                     Section("About") {
@@ -151,6 +164,61 @@ struct LogsView: View {
                         dismiss()
                     }
                 }
+            }
+        }
+    }
+}
+
+struct TunnelDebugLogsView: View {
+    @EnvironmentObject var viewModel: VPNViewModel
+    @State private var logText: String = "Loading..."
+    @State private var isLoading = false
+
+    var body: some View {
+        ZStack {
+            Color(UIColor.systemBackground).ignoresSafeArea()
+
+            ScrollView {
+                Text(logText)
+                    .font(.system(.caption2, design: .monospaced))
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .navigationTitle("Debug Logs")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack {
+                    Button(action: refreshLogs) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+
+                    ShareLink(item: logText) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+        }
+        .onAppear { refreshLogs() }
+    }
+
+    private func refreshLogs() {
+        isLoading = true
+        // Try reading from shared container first
+        let sharedLogs = viewModel.readSharedLogs()
+        if sharedLogs != "No logs yet" {
+            logText = sharedLogs
+            isLoading = false
+            return
+        }
+
+        // Fallback: try via tunnel message
+        viewModel.fetchTunnelLogs { result in
+            DispatchQueue.main.async {
+                logText = result
+                isLoading = false
             }
         }
     }

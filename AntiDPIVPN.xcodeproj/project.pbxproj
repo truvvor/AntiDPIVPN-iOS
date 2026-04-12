@@ -18,7 +18,6 @@
 		7276552D61BC6AB3EA0ECEAE /* PacketTunnelExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 482B95CEB125D8124C1A6933 /* PacketTunnelExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		74BFB8D8A00F7B1611C5FAB5 /* VPNViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EFE4216263640560C5C4E61 /* VPNViewModel.swift */; };
 		872B36D9B34D74DFF1CC066B /* AntiDPISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EE8A44D83D2670B55B6490 /* AntiDPISettings.swift */; };
-		8EB6D1FA9203AABDBEDCEC55 /* LibXray.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 92D12C5179DA6EA5CE297CFB /* LibXray.xcframework */; };
 		92F15DE1DA18534BF40ECE64 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D5060DC524D486F75B03C0A /* SettingsView.swift */; };
 		9D86BECFFB28AA12004A3733 /* ProfileEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DC8C4A1CA527A5703E67EE /* ProfileEditView.swift */; };
 		CC90D65A3F878081D1E933D8 /* VPNProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC217AB208E0EB1BB5BB2B24 /* VPNProfile.swift */; };
@@ -104,7 +103,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8EB6D1FA9203AABDBEDCEC55 /* LibXray.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -34,3 +34,11 @@ ExportOptions.plist
 
 # Logs
 *.log
+
+# LibXray backups
+LibXray.xcframework.bak.v14/
+LibXray.xcframework.bak.v20/
+
+# Simulator binaries (too large for GitHub)
+LibXray.xcframework/ios-arm64_x86_64-simulator/
+HevSocks5Tunnel.xcframework/ios-arm64_x86_64-simulator/

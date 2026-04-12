@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AntiDPISettingsView: View {
     @Binding var settings: AntiDPISettings
+    @ObservedObject var viewModel: VPNViewModel
 
     var body: some View {
         ZStack {
@@ -21,6 +22,66 @@ struct AntiDPISettingsView: View {
                 }
 
                 if settings.enabled {
+                    // === ADAPTIVE ANTI-DPI ===
+                    Section {
+                        Toggle("Adaptive Mode", isOn: $settings.adaptiveEnabled)
+
+                        if settings.adaptiveEnabled {
+                            HStack {
+                                Text("Current Level")
+                                Spacer()
+                                Text(viewModel.adaptiveLevelDescription)
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                            }
+
+                            if !viewModel.adaptiveStatus.isEmpty {
+                                HStack {
+                                    Image(systemName: "antenna.radiowaves.left.and.right")
+                                        .foregroundColor(.blue)
+                                    Text(viewModel.adaptiveStatus)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            Button("Reset to Default Level") {
+                                viewModel.resetAdaptiveLevel()
+                            }
+                            .foregroundColor(.orange)
+                        }
+                    } header: {
+                        Label("Adaptive Anti-DPI", systemImage: "brain.head.profile")
+                    } footer: {
+                        Text("Auto-adjusts global bandwidth limit to evade DPI. Reduces on disconnect, increases after 5 min stable. Levels: 1/3/8/20/unlimited MB/s.")
+                    }
+
+                    // === MANUAL BANDWIDTH (when adaptive is off) ===
+                    if !settings.adaptiveEnabled {
+                        Section {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Global Bandwidth Limit")
+                                    Spacer()
+                                    Text(settings.bandwidthLimitKBs > 0 ? "\(settings.bandwidthLimitKBs / 1024) MB/s" : "Unlimited")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(
+                                    value: Binding(
+                                        get: { Double(settings.bandwidthLimitKBs) },
+                                        set: { settings.bandwidthLimitKBs = Int($0) }
+                                    ),
+                                    in: 0...51200,
+                                    step: 1024
+                                )
+                            }
+                        } header: {
+                            Label("Bandwidth Control", systemImage: "gauge.with.dots.needle.bottom.50percent")
+                        } footer: {
+                            Text("Global limit shared across all connections. Lower = stealthier. 0 = unlimited.")
+                        }
+                    }
+
                     Section("Scatter") {
                         Toggle("Scatter", isOn: $settings.scatterEnabled)
 
@@ -152,6 +213,6 @@ struct AntiDPISettingsView: View {
 
 #Preview {
     NavigationStack {
-        AntiDPISettingsView(settings: .constant(AntiDPISettings()))
+        AntiDPISettingsView(settings: .constant(AntiDPISettings()), viewModel: VPNViewModel())
     }
 }
