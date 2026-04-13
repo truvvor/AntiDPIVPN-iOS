@@ -193,7 +193,7 @@ struct ConfigGenerator {
         }
 
         return [
-            "domainStrategy": routeConfig.isActive ? routeConfig.domainStrategy : "AsIs",
+            "domainStrategy": "AsIs",
             "rules": rules
         ]
     }
