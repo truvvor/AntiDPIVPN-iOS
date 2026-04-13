@@ -25,6 +25,9 @@
 		DC28438AD7A7141E916681CD /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF59F610D8B8E798357D550 /* ConnectView.swift */; };
 		E9D2EDB4ADB5A8A56244807D /* ConfigGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9B6193A2DC95189BD22A913 /* ConfigGenerator.swift */; };
 		F7FDB865A701586A59A47F65 /* AntiDPIVPNApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8EA7544BF2BF50D5A91CFE /* AntiDPIVPNApp.swift */; };
+		F2E1D0C9B8A7F6E5D4C3B2A1 /* RouteConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* RouteConfig.swift */; };
+		A3F2E1D0C9B8A7F6E5D4C3B2 /* GeoDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */; };
+		B4A3F2E1D0C9B8A7F6E5D4C3 /* StreisandRouteParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +90,9 @@
 		CBC5F059AB01B17FF30C3615 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		EA84112D548F283CB4719759 /* ProfilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilesView.swift; sourceTree = "<group>"; };
 		FCF59F610D8B8E798357D550 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* RouteConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteConfig.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoDataManager.swift; sourceTree = "<group>"; };
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreisandRouteParser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,6 +119,8 @@
 			isa = PBXGroup;
 			children = (
 				C9B6193A2DC95189BD22A913 /* ConfigGenerator.swift */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */,
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */,
 				2AD10C25667B4CE7C78E6B9D /* VLESSURLParser.swift */,
 				A06439C4642DA0542D90862B /* VPNManager.swift */,
 			);
@@ -143,6 +151,7 @@
 			children = (
 				44EE8A44D83D2670B55B6490 /* AntiDPISettings.swift */,
 				AC217AB208E0EB1BB5BB2B24 /* VPNProfile.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* RouteConfig.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -320,6 +329,9 @@
 				00E50E924788BB856674FA8F /* VLESSURLParser.swift in Sources */,
 				55B770B19187D6B4A3158905 /* VPNManager.swift in Sources */,
 				CC90D65A3F878081D1E933D8 /* VPNProfile.swift in Sources */,
+				F2E1D0C9B8A7F6E5D4C3B2A1 /* RouteConfig.swift in Sources */,
+				A3F2E1D0C9B8A7F6E5D4C3B2 /* GeoDataManager.swift in Sources */,
+				B4A3F2E1D0C9B8A7F6E5D4C3 /* StreisandRouteParser.swift in Sources */,
 				74BFB8D8A00F7B1611C5FAB5 /* VPNViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
