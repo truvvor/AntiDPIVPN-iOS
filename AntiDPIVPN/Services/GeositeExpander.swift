@@ -40,8 +40,8 @@ class GeositeExpander {
                     }
                 }
                 if !allDomains.isEmpty {
-                    // Create domain rule with expanded list (limit to top 500 to save memory)
-                    let limited = Array(allDomains.prefix(500))
+                    // Limit to top 50 per category to keep config small for extension
+                    let limited = Array(allDomains.prefix(50))
                     newRules.append(RouteRule(type: .domain, values: limited, outboundTag: rule.outboundTag))
                 }
             } else {
