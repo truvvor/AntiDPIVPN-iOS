@@ -161,6 +161,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let serverAddress = providerConfig["serverAddress"] as? String ?? ""
         let dnsServers = providerConfig["dnsServers"] as? [String] ?? ["8.8.8.8", "2001:4860:4860::8888"]
         fileLog("configJSON length=\(configJSON.count) server=\(serverAddress)")
+        // Log first 2000 chars of config for debugging routing issues
+        fileLog("CONFIG: \(String(configJSON.prefix(2000)))")
+        flushLog()
 
         guard startXray(configJSON: configJSON) else {
             completionHandler(NSError(domain: "PTP", code: -3, userInfo: [NSLocalizedDescriptionKey: "Xray failed to start"]))
