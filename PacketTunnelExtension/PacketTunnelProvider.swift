@@ -155,36 +155,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         // Create box service
-        do {
-            var serviceError: NSError?
-            let service = LibboxNewService(configJSON, self, &serviceError)
-            if let err = serviceError {
-                fileLog("LibboxNewService error: \(err.localizedDescription)")
-                completionHandler(err)
-                return
-            }
-            guard let service = service else {
-                fileLog("ERROR: LibboxNewService returned nil")
-                completionHandler(NSError(domain: "PTP", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create service"]))
-                return
-            }
-            boxService = service
-            fileLog("sing-box service created")
-            flushLog()
-
-            // Start service
-            var startError: NSError?
-            let started = service.start(&startError)
-            if let err = startError {
-                fileLog("sing-box start error: \(err.localizedDescription)")
-                completionHandler(err)
-                return
-            }
-
-            let m1 = getMemoryMB()
-            fileLog("sing-box started — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
-            flushLog()
+        var serviceError: NSError?
+        let service = LibboxNewService(configJSON, self, &serviceError)
+        if let err = serviceError {
+            fileLog("LibboxNewService error: \(err.localizedDescription)")
+            completionHandler(err)
+            return
         }
+        guard let service = service else {
+            fileLog("ERROR: LibboxNewService returned nil")
+            completionHandler(NSError(domain: "PTP", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create service"]))
+            return
+        }
+        boxService = service
+        fileLog("sing-box service created")
+        flushLog()
+
+        do {
+            try service.start()
+        } catch {
+            fileLog("sing-box start error: \(error.localizedDescription)")
+            completionHandler(error)
+            return
+        }
+
+        let m1 = getMemoryMB()
+        fileLog("sing-box started — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+        flushLog()
 
         // Network settings
         let tunnelRemote = (serverAddress.isEmpty || isIPv6Address(serverAddress)) ? "254.1.1.1" : serverAddress
@@ -291,28 +288,29 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 // MARK: - LibboxPlatformInterfaceProtocol
 
 extension PacketTunnelProvider: LibboxPlatformInterfaceProtocol {
-    @objc func autoDetectInterfaceControl(_ fd: Int32) throws {
+    @objc func autoDetectControl(_ fd: Int32) throws {
     }
 
     @objc func clearDNSCache() {
     }
 
-    @objc func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListener?) throws {
+    @objc func closeDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListenerProtocol)?) throws {
     }
 
     @objc func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32, ret0_: UnsafeMutablePointer<Int32>?) throws {
         ret0_?.pointee = -1
     }
 
-    @objc func getInterfaces() throws -> LibboxNetworkInterfaceIterator? {
-        return nil
+    @objc func getInterfaces() throws -> any LibboxNetworkInterfaceIteratorProtocol {
+        // Return empty iterator — not needed on iOS
+        fatalError("getInterfaces not implemented")
     }
 
     @objc func includeAllNetworks() -> Bool {
         return false
     }
 
-    @objc func openTun(_ options: LibboxTunOptions?, ret0_: UnsafeMutablePointer<Int32>?) throws {
+    @objc func openTun(_ options: (any LibboxTunOptionsProtocol)?, ret0_: UnsafeMutablePointer<Int32>?) throws {
         guard let fd = self.packetFlow.value(forKeyPath: "socket.fileDescriptor") as? Int32 else {
             fileLog("ERROR: cannot get TUN fd from packetFlow")
             throw NSError(domain: "PTP", code: -10, userInfo: [NSLocalizedDescriptionKey: "Cannot get TUN fd"])
@@ -321,7 +319,7 @@ extension PacketTunnelProvider: LibboxPlatformInterfaceProtocol {
         fileLog("openTun: fd=\(fd)")
     }
 
-    @objc func packageName(byUid uid: Int32) throws -> String {
+    @objc func packageName(byUid uid: Int32, error: NSErrorPointer) -> String {
         return ""
     }
 
@@ -329,20 +327,20 @@ extension PacketTunnelProvider: LibboxPlatformInterfaceProtocol {
         return nil
     }
 
-    @objc func sendNotification(_ notification: LibboxNotification?) throws {
+    @objc func send(_ notification: LibboxNotification?) throws {
     }
 
-    @objc func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListener?) throws {
+    @objc func startDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListenerProtocol)?) throws {
     }
 
-    @objc func uidByPackageName(_ packageName: String?) throws {
+    @objc func uid(byPackageName packageName: String?, ret0_: UnsafeMutablePointer<Int32>?) throws {
     }
 
     @objc func underNetworkExtension() -> Bool {
         return true
     }
 
-    @objc func usePlatformAutoDetectInterfaceControl() -> Bool {
+    @objc func usePlatformAutoDetectControl() -> Bool {
         return true
     }
 
