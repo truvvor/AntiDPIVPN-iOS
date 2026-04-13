@@ -130,15 +130,9 @@ struct ConfigGenerator {
             "protocol": "socks",
             "settings": ["udp": true]
         ]
-        // Sniffing extracts domain from TLS SNI — needed because hev-socks5-tunnel
-        // sends IPs to SOCKS5, not domains. routeOnly=true for Vision compatibility.
-        if routeConfig.isActive {
-            inboundConfig["sniffing"] = [
-                "enabled": true,
-                "destOverride": ["http", "tls"],
-                "routeOnly": true
-            ] as [String: Any]
-        }
+        // Sniffing disabled — incompatible with XTLS-Vision (breaks connections).
+        // Domain routing won't work (hev-socks5-tunnel sends IPs, not domains).
+        // GeoIP rules work without sniffing (match by destination IP).
 
         let config: [String: Any] = [
             "log": logConfig,
@@ -170,9 +164,12 @@ struct ConfigGenerator {
         ] as [String: Any])
 
         if routeConfig.isActive {
-            // Rules should already be expanded by VPNViewModel before reaching here.
-            // Filter out any remaining geosite/geoip rules (safety net).
-            let activeRules = routeConfig.rules.filter { $0.type != .geosite && $0.type != .geoip }
+            // Domain rules: expand geosite in main app, skip plain domain/regexp
+            // (they don't work without sniffing since hev-socks5-tunnel sends IPs)
+            // GeoIP rules: work WITHOUT sniffing (match by destination IP address)
+            let expandedConfig = GeositeExpander.shared.expandRouteConfig(routeConfig)
+            // Only keep geoip and port rules — domain rules need sniffing which breaks Vision
+            let activeRules = expandedConfig.rules.filter { $0.type == .geoip || $0.type == .port }
 
             let proxyRules = activeRules.filter { $0.outboundTag == "proxy" }
             let directRules = activeRules.filter { $0.outboundTag == "direct" }
