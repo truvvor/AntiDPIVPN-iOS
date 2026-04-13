@@ -272,10 +272,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         memoryTimer?.cancel(); memoryTimer = nil
         pathMonitor?.cancel(); pathMonitor = nil
 
-        var closeError: NSError?
-        boxService?.close(&closeError)
-        if let err = closeError {
-            fileLog("sing-box close error: \(err.localizedDescription)")
+        do {
+            try boxService?.close()
+        } catch {
+            fileLog("sing-box close error: \(error.localizedDescription)")
         }
         boxService = nil
         fileLog("sing-box stopped")
@@ -288,35 +288,31 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 
-// MARK: - LibboxPlatformInterface
+// MARK: - LibboxPlatformInterfaceProtocol
 
-extension PacketTunnelProvider: LibboxPlatformInterface {
-    func autoDetectInterfaceControl(_ fd: Int32) throws {
-        // Not needed on iOS — NetworkExtension handles routing
+extension PacketTunnelProvider: LibboxPlatformInterfaceProtocol {
+    @objc func autoDetectInterfaceControl(_ fd: Int32) throws {
     }
 
-    func clearDNSCache() {
-        // iOS handles DNS caching
+    @objc func clearDNSCache() {
     }
 
-    func closeDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListener)?) throws {
-        // Handled by NWPathMonitor
+    @objc func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListener?) throws {
     }
 
-    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32, ret0_: UnsafeMutablePointer<Int32>?) throws {
+    @objc func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32, ret0_: UnsafeMutablePointer<Int32>?) throws {
         ret0_?.pointee = -1
     }
 
-    func getInterfaces() throws -> (any LibboxNetworkInterfaceIterator)? {
+    @objc func getInterfaces() throws -> LibboxNetworkInterfaceIterator? {
         return nil
     }
 
-    func includeAllNetworks() -> Bool {
+    @objc func includeAllNetworks() -> Bool {
         return false
     }
 
-    func openTun(_ options: (any LibboxTunOptions)?, ret0_: UnsafeMutablePointer<Int32>?) throws {
-        // sing-box requests a TUN fd — use packetFlow
+    @objc func openTun(_ options: LibboxTunOptions?, ret0_: UnsafeMutablePointer<Int32>?) throws {
         guard let fd = self.packetFlow.value(forKeyPath: "socket.fileDescriptor") as? Int32 else {
             fileLog("ERROR: cannot get TUN fd from packetFlow")
             throw NSError(domain: "PTP", code: -10, userInfo: [NSLocalizedDescriptionKey: "Cannot get TUN fd"])
@@ -325,39 +321,36 @@ extension PacketTunnelProvider: LibboxPlatformInterface {
         fileLog("openTun: fd=\(fd)")
     }
 
-    func packageName(byUid uid: Int32) throws -> String {
+    @objc func packageName(byUid uid: Int32) throws -> String {
         return ""
     }
 
-    func readWIFIState() -> LibboxWIFIState? {
+    @objc func readWIFIState() -> LibboxWIFIState? {
         return nil
     }
 
-    func sendNotification(_ notification: LibboxNotification?) throws {
-        // Not implemented
+    @objc func sendNotification(_ notification: LibboxNotification?) throws {
     }
 
-    func startDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListener)?) throws {
-        // Handled by NWPathMonitor
+    @objc func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListener?) throws {
     }
 
-    func uidByPackageName(_ packageName: String?) throws {
-        // Not needed on iOS
+    @objc func uidByPackageName(_ packageName: String?) throws {
     }
 
-    func underNetworkExtension() -> Bool {
+    @objc func underNetworkExtension() -> Bool {
         return true
     }
 
-    func usePlatformAutoDetectInterfaceControl() -> Bool {
+    @objc func usePlatformAutoDetectInterfaceControl() -> Bool {
         return true
     }
 
-    func useProcFS() -> Bool {
+    @objc func useProcFS() -> Bool {
         return false
     }
 
-    func writeLog(_ message: String?) {
+    @objc func writeLog(_ message: String?) {
         if let msg = message {
             fileLog("[sing-box] \(msg)")
         }
