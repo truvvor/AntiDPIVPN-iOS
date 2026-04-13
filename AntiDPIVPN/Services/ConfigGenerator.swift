@@ -80,8 +80,7 @@ struct ConfigGenerator {
             "concurrency": -1
         ]
 
-        // Outbounds: proxy + direct + block
-        var outbounds: [[String: Any]] = [
+        let outbounds: [[String: Any]] = [
             [
                 "protocol": "vless",
                 "tag": "proxy",
@@ -124,29 +123,25 @@ struct ConfigGenerator {
             ] as [String: Any]
         ]
 
-        var config: [String: Any] = [
+        // Build inbound
+        var inboundConfig: [String: Any] = [
+            "listen": "127.0.0.1",
+            "port": 3080,
+            "protocol": "socks",
+            "settings": ["udp": true]
+        ]
+        if routeConfig.isActive && routeConfig.rules.contains(where: { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }) {
+            inboundConfig["sniffing"] = [
+                "enabled": true,
+                "destOverride": ["http", "tls"]
+            ] as [String: Any]
+        }
+
+        let config: [String: Any] = [
             "log": logConfig,
             "policy": policy,
             "routing": routing,
-            "inbounds": [
-                {
-                    var inbound: [String: Any] = [
-                        "listen": "127.0.0.1",
-                        "port": 3080,
-                        "protocol": "socks",
-                        "settings": ["udp": true]
-                    ]
-                    // Only enable sniffing when routing has domain rules (needed for domain matching)
-                    let hasDomainRules = routeConfig.isActive && routeConfig.rules.contains { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }
-                    if hasDomainRules {
-                        inbound["sniffing"] = [
-                            "enabled": true,
-                            "destOverride": ["http", "tls"]
-                        ] as [String: Any]
-                    }
-                    return inbound
-                }()
-            ],
+            "inbounds": [inboundConfig] as [[String: Any]],
             "outbounds": outbounds
         ]
 
