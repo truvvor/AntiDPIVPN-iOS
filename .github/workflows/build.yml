@@ -44,7 +44,26 @@ jobs:
             DEVELOPMENT_TEAM=WJWU38ALPB \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
 
-          # Create ExportOptions          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>method</key>\n  <string>app-store-connect</string>\n  <key>uploadSymbols</key>\n  <false/>\n  <key>signingStyle</key>\n  <string>automatic</string>\n  <key>teamID</key>\n  <string>WJWU38ALPB</string>\n</dict>\n</plist>\n' > $RUNNER_TEMP/ExportOptions.plist
+          # Create ExportOptions plist
+          cat > $RUNNER_TEMP/ExportOptions.plist << 'PLISTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>uploadSymbols</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>WJWU38ALPB</string>
+          </dict>
+          </plist>
+          PLISTEOF
+
+          echo "ExportOptions.plist created:"
+          cat $RUNNER_TEMP/ExportOptions.plist
 
           # Export IPA
           xcodebuild -exportArchive \
