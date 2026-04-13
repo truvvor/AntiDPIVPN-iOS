@@ -29,6 +29,7 @@
 		A3F2E1D0C9B8A7F6E5D4C3B2 /* GeoDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */; };
 		B4A3F2E1D0C9B8A7F6E5D4C3 /* StreisandRouteParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */; };
 		C5B4A3F2E1D0C9B8A7F6E5D4 /* RoutingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* RoutingSettingsView.swift */; };
+		D6C5B4A3F2E1D0C9B8A7F6E5 /* GeositeExpander.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* GeositeExpander.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -95,6 +96,7 @@
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoDataManager.swift; sourceTree = "<group>"; };
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreisandRouteParser.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* RoutingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingSettingsView.swift; sourceTree = "<group>"; };
+		E5F6A7B8C9D0E1F2A3B4C5D6 /* GeositeExpander.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeositeExpander.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -121,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				C9B6193A2DC95189BD22A913 /* ConfigGenerator.swift */,
+				E5F6A7B8C9D0E1F2A3B4C5D6 /* GeositeExpander.swift */,
 				B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */,
 				2AD10C25667B4CE7C78E6B9D /* VLESSURLParser.swift */,
@@ -332,6 +335,7 @@
 				00E50E924788BB856674FA8F /* VLESSURLParser.swift in Sources */,
 				55B770B19187D6B4A3158905 /* VPNManager.swift in Sources */,
 				CC90D65A3F878081D1E933D8 /* VPNProfile.swift in Sources */,
+				D6C5B4A3F2E1D0C9B8A7F6E5 /* GeositeExpander.swift in Sources */,
 				C5B4A3F2E1D0C9B8A7F6E5D4 /* RoutingSettingsView.swift in Sources */,
 				F2E1D0C9B8A7F6E5D4C3B2A1 /* RouteConfig.swift in Sources */,
 				A3F2E1D0C9B8A7F6E5D4C3B2 /* GeoDataManager.swift in Sources */,
