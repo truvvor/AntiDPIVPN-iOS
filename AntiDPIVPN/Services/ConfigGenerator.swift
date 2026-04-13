@@ -133,7 +133,8 @@ struct ConfigGenerator {
         if routeConfig.isActive && routeConfig.rules.contains(where: { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }) {
             inboundConfig["sniffing"] = [
                 "enabled": true,
-                "destOverride": ["http", "tls"]
+                "destOverride": ["http", "tls"],
+                "routeOnly": true
             ] as [String: Any]
         }
 
