@@ -170,9 +170,10 @@ struct ConfigGenerator {
         ] as [String: Any])
 
         if routeConfig.isActive {
-            // NEVER use geosite/geoip rules in Network Extension — loading .dat files
-            // adds ~15MB and crashes the extension. Only domain/regexp/port rules are safe.
-            let activeRules = routeConfig.rules.filter { $0.type != .geosite && $0.type != .geoip }
+            // Expand geosite rules to domain lists (done in main app, no .dat in extension)
+            // geoip rules are dropped (IP range data too heavy for extension)
+            let expandedConfig = GeositeExpander.shared.expandRouteConfig(routeConfig)
+            let activeRules = expandedConfig.rules.filter { $0.type != .geoip }
 
             let proxyRules = activeRules.filter { $0.outboundTag == "proxy" }
             let directRules = activeRules.filter { $0.outboundTag == "direct" }
