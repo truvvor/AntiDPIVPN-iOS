@@ -21,6 +21,11 @@ jobs:
             unzip -qo Libbox.xcframework.zip
           fi
 
+      - name: Generate Xcode project
+        run: |
+          which xcodegen || brew install xcodegen
+          xcodegen generate
+
       - name: Build and Upload
         env:
           RUNNER_TEMP: ${{ runner.temp }}
