@@ -326,7 +326,6 @@ class VPNViewModel: ObservableObject {
         DispatchQueue.global(qos: .background).async {
             let version = LibboxVersion()
             DispatchQueue.main.async { self.xrayVersion = version }
-            }
         }
     }
 
