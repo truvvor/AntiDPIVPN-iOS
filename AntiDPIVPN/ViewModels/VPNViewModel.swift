@@ -294,34 +294,11 @@ class VPNViewModel: ObservableObject {
     }
 
     private func doConnect() {
-        let bandwidth: Int
-        if currentProfile.antiDPISettings.adaptiveEnabled {
-            bandwidth = currentBandwidthKBs
-        } else {
-            bandwidth = currentProfile.antiDPISettings.bandwidthLimitKBs
-        }
-
-        var debugLogPath: String? = nil
-        if let containerURL = sharedContainerURL {
-            let logsDir = containerURL.appendingPathComponent("Logs")
-            try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
-            debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
-        }
-
-        // Expand geosite rules in main app (no memory limit here)
-        var expandedRoute = globalRoute
-        if globalRoute.isActive {
-            addLog("Expanding geosite rules...")
-            expandedRoute = GeositeExpander.shared.expandRouteConfig(globalRoute)
-            let ruleCount = expandedRoute.rules.count
-            let domainCount = expandedRoute.rules.reduce(0) { $0 + $1.values.count }
-            addLog("Expanded: \(ruleCount) rules, \(domainCount) total values")
-        }
-
-        guard let config = ConfigGenerator.generateXrayConfig(
-            from: currentProfile, routeConfig: expandedRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
+        // Generate sing-box config
+        guard let config = SingBoxConfigGenerator.generateConfig(
+            from: currentProfile, routeConfig: globalRoute
         ) else {
-            addLog("Failed to generate Xray config")
+            addLog("Failed to generate sing-box config")
             return
         }
 
@@ -347,11 +324,8 @@ class VPNViewModel: ObservableObject {
 
     private func updateVersion() {
         DispatchQueue.global(qos: .background).async {
-            let responseBase64 = LibXrayXrayVersion()
-            if let responseData = Data(base64Encoded: responseBase64),
-               let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-               let data = response["data"] as? String {
-                DispatchQueue.main.async { self.xrayVersion = data }
+            let version = LibboxVersion()
+            DispatchQueue.main.async { self.xrayVersion = version }
             }
         }
     }

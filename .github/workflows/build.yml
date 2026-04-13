@@ -2,7 +2,7 @@ name: Build & Upload to TestFlight
 
 on:
   push:
-    branches: [main, claude/reduce-memory-usage-BwFrG]
+    branches: [main, 'claude/**']
   workflow_dispatch:
 
 jobs:
@@ -12,6 +12,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download Libbox.xcframework
+        run: |
+          if [ ! -d "Libbox.xcframework" ] || [ ! -d "Libbox.xcframework/ios-arm64" ]; then
+            curl -L -o Libbox.xcframework.zip \
+              https://github.com/EbrahimTahernejad/sing-box-lib/releases/download/1.11.11/Libbox.xcframework.zip
+            unzip -qo Libbox.xcframework.zip
+          fi
 
       - name: Build and Upload
         env:

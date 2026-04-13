@@ -2,39 +2,17 @@ import NetworkExtension
 import Network
 import os.log
 
-/// Build 36 — Clean single-mode, no memory throttling.
-/// Trust iOS to manage memory. If extension is killed by jetsam,
-/// iOS auto-reconnects the VPN (disconnectOnSleep=false).
-/// connIdle=30s policy handles stale connection cleanup.
+/// PacketTunnelProvider — sing-box powered VPN extension.
+/// sing-box handles TUN natively, no hev-socks5-tunnel needed.
+/// Supports VLESS + REALITY + Vision, fake-ip DNS routing.
 class PacketTunnelProvider: NEPacketTunnelProvider {
+    private var boxService: LibboxBoxService?
+    private var commandServer: LibboxCommandServer?
     private var isTunnelRunning = false
-    private var appSideFd: Int32 = -1
-    private var tunSideFd: Int32 = -1
-    private var isRelayRunning = false
-    private var readSource: DispatchSourceRead?
     private var memoryTimer: DispatchSourceTimer?
-
-    // Stall detection + auto-restart
-    private var lastTrafficTotal: UInt64 = 0
-    private var stallTicks: Int = 0
-    private var savedConfigJSON: String = ""
-
-    // Network change detection
     private var pathMonitor: NWPathMonitor?
     private var currentNetworkPath: String = ""
-
-    // Stats
-    private var packetsSent: UInt64 = 0
-    private var packetsRecv: UInt64 = 0
-    private var packetsDropped: UInt64 = 0
-
-    // Pre-allocated read buffer (reused across events)
-    private let readBufSize = 2048
-    private var readBuf: UnsafeMutablePointer<UInt8>?
-
-    // Pre-built AF headers
-    private static let afInet4Header = Data([0, 0, 0, 2])
-    private static let afInet6Header = Data([0, 0, 0, 30])
+    private var savedConfigJSON: String = ""
 
     // Logging
     private var logFileHandle: FileHandle?
@@ -78,7 +56,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         logBuffer.removeAll(keepingCapacity: true)
     }
 
-    // MARK: - Memory (diagnostic only, no throttling)
+    // MARK: - Memory
 
     private func getMemoryMB() -> (used: Double, avail: Double) {
         var info = mach_task_basic_info()
@@ -99,106 +77,34 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
-            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
-
-            // Stall detection: if no new packets for 60s (4 ticks × 15s), restart xray
-            let currentTotal = self.packetsSent + self.packetsRecv
-            if currentTotal > 0 && currentTotal == self.lastTrafficTotal {
-                self.stallTicks += 1
-                if self.stallTicks >= 4 {
-                    self.fileLog("STALL: no traffic for 60s — restarting xray")
-                    self.flushLog()
-                    self.restartXray()
-                    self.stallTicks = 0
-                }
-            } else {
-                self.stallTicks = 0
-                self.lastTrafficTotal = currentTotal
-            }
+            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
         }
         memoryTimer = timer
         timer.resume()
     }
 
-    // MARK: - Xray
+    // MARK: - Network Monitor
 
-    /// Restart xray in-place to recover from stalled VLESS connection.
-    private func restartXray() {
-        guard !savedConfigJSON.isEmpty else {
-            fileLog("Cannot restart: no saved config")
-            return
-        }
-        let m0 = getMemoryMB()
-        fileLog("Restarting xray — MEM: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
-        _ = LibXrayStopXray()
-        usleep(300_000)
-        if startXray(configJSON: savedConfigJSON) {
-            let m1 = getMemoryMB()
-            fileLog("Xray restarted OK — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
-        } else {
-            fileLog("ERROR: xray restart FAILED")
-        }
-    }
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self, self.isTunnelRunning else { return }
+            let desc = path.usesInterfaceType(.wifi) ? "wifi" :
+                       path.usesInterfaceType(.cellular) ? "cellular" : "other"
+            let pathKey = "\(desc)-\(path.status)"
 
-    private func startXray(configJSON: String) -> Bool {
-        guard let containerURL = sharedContainerURL else {
-            fileLog("ERROR: no shared container")
-            return false
-        }
-
-        let datDir = containerURL.appendingPathComponent("xray_dat").path
-        try? FileManager.default.createDirectory(atPath: datDir, withIntermediateDirectories: true)
-
-        // Delete old xray_cache directory (was incorrectly used as mphCachePath)
-        let oldCacheDir = containerURL.appendingPathComponent("xray_cache").path
-        try? FileManager.default.removeItem(atPath: oldCacheDir)
-
-        // List dat files for debugging
-        let datFiles = (try? FileManager.default.contentsOfDirectory(atPath: datDir)) ?? []
-        fileLog("datDir files: \(datFiles)")
-        flushLog()
-
-        let requestDict: [String: Any] = [
-            "datDir": datDir,
-            "configJSON": configJSON
-        ]
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: requestDict),
-              let base64String = jsonData.base64EncodedString() as String? else {
-            fileLog("ERROR: failed to serialize xray request")
-            flushLog()
-            return false
-        }
-
-        fileLog("xray request base64 length: \(base64String.count)")
-        let m0 = getMemoryMB()
-        fileLog("MEM@pre-xray: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
-        flushLog()
-
-        fileLog("Calling LibXrayRunXrayFromJSON...")
-        flushLog()
-
-        let responseBase64 = LibXrayRunXrayFromJSON(base64String)
-
-        let m1 = getMemoryMB()
-        fileLog("LibXray returned — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
-        fileLog("Response length: \(responseBase64.count)")
-
-        if let responseData = Data(base64Encoded: responseBase64),
-           let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
-            let success = response["success"] as? Bool ?? false
-            let errMsg = response["error"] as? String ?? ""
-            fileLog("xray response: success=\(success) error='\(errMsg)'")
-            flushLog()
-            if success {
-                return true
-            } else {
-                return false
+            if self.currentNetworkPath.isEmpty {
+                self.currentNetworkPath = pathKey
+                self.fileLog("Network: \(desc) (\(path.status))")
+            } else if pathKey != self.currentNetworkPath {
+                self.fileLog("Network CHANGED: \(self.currentNetworkPath) → \(pathKey)")
+                self.currentNetworkPath = pathKey
+                self.boxService?.resetNetwork()
+                self.fileLog("sing-box network reset")
             }
         }
-        fileLog("ERROR: failed to decode xray response base64")
-        fileLog("Raw response: \(String(responseBase64.prefix(200)))")
-        flushLog()
-        return false
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        pathMonitor = monitor
     }
 
     // MARK: - Tunnel Lifecycle
@@ -210,35 +116,83 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 38) — routing, DNS, keepalive")
+        fileLog("Starting tunnel (v1.4) — sing-box engine")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
               let providerConfig = protocolConfig.providerConfiguration,
               let configJSON = providerConfig["configJSON"] as? String, !configJSON.isEmpty else {
-            completionHandler(NSError(domain: "PTP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing or empty config"]))
+            completionHandler(NSError(domain: "PTP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing config"]))
             return
         }
 
         let serverAddress = providerConfig["serverAddress"] as? String ?? ""
         let dnsServers = providerConfig["dnsServers"] as? [String] ?? ["8.8.8.8", "2001:4860:4860::8888"]
+        savedConfigJSON = configJSON
+
         fileLog("configJSON length=\(configJSON.count) server=\(serverAddress)")
-        // Log first 2000 chars of config for debugging routing issues
         fileLog("CONFIG: \(String(configJSON.prefix(2000)))")
         flushLog()
 
-        savedConfigJSON = configJSON
-        guard startXray(configJSON: configJSON) else {
-            completionHandler(NSError(domain: "PTP", code: -3, userInfo: [NSLocalizedDescriptionKey: "Xray failed to start"]))
-            return
+        // Setup sing-box
+        do {
+            let setupOptions = LibboxSetupOptions()
+            if let containerURL = sharedContainerURL {
+                setupOptions.basePath = containerURL.path
+                setupOptions.workingPath = containerURL.appendingPathComponent("sing-box").path
+                try? FileManager.default.createDirectory(atPath: setupOptions.workingPath, withIntermediateDirectories: true)
+            }
+
+            var setupError: NSError?
+            LibboxSetup(setupOptions, &setupError)
+            if let err = setupError {
+                fileLog("LibboxSetup error: \(err.localizedDescription)")
+                completionHandler(err)
+                return
+            }
+            fileLog("LibboxSetup OK")
+            flushLog()
         }
 
+        // Create box service
+        do {
+            var serviceError: NSError?
+            let service = LibboxNewService(configJSON, self, &serviceError)
+            if let err = serviceError {
+                fileLog("LibboxNewService error: \(err.localizedDescription)")
+                completionHandler(err)
+                return
+            }
+            guard let service = service else {
+                fileLog("ERROR: LibboxNewService returned nil")
+                completionHandler(NSError(domain: "PTP", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create service"]))
+                return
+            }
+            boxService = service
+            fileLog("sing-box service created")
+            flushLog()
+
+            // Start service
+            var startError: NSError?
+            let started = service.start(&startError)
+            if let err = startError {
+                fileLog("sing-box start error: \(err.localizedDescription)")
+                completionHandler(err)
+                return
+            }
+
+            let m1 = getMemoryMB()
+            fileLog("sing-box started — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+            flushLog()
+        }
+
+        // Network settings
         let tunnelRemote = (serverAddress.isEmpty || isIPv6Address(serverAddress)) ? "254.1.1.1" : serverAddress
 
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelRemote)
-        settings.mtu = 1400
+        settings.mtu = 9000
 
-        let ipv4 = NEIPv4Settings(addresses: ["198.18.0.1"], subnetMasks: ["255.255.255.0"])
+        let ipv4 = NEIPv4Settings(addresses: ["172.19.0.1"], subnetMasks: ["255.255.255.252"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
         if !serverAddress.isEmpty && !isIPv6Address(serverAddress) {
             ipv4.excludedRoutes = [NEIPv4Route(destinationAddress: serverAddress, subnetMask: "255.255.255.255")]
@@ -246,7 +200,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         settings.ipv4Settings = ipv4
 
-        let ipv6 = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [128])
+        let ipv6 = NEIPv6Settings(addresses: ["fdfe:dcba:9876::1"], networkPrefixLengths: [126])
         ipv6.includedRoutes = [NEIPv6Route.default()]
         if !serverAddress.isEmpty && isIPv6Address(serverAddress) {
             ipv6.excludedRoutes = [NEIPv6Route(destinationAddress: serverAddress, networkPrefixLength: 128)]
@@ -263,131 +217,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 return
             }
             self.fileLog("Network settings applied")
-
-            self.startTun2Socks(socksPort: 3080)
             self.isTunnelRunning = true
             self.startMemoryMonitor()
             self.startNetworkMonitor()
-            let m1 = self.getMemoryMB()
-            self.fileLog("MEM@ready: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+            let m2 = self.getMemoryMB()
+            self.fileLog("MEM@ready: used=\(String(format: "%.1f", m2.used))MB avail=\(String(format: "%.1f", m2.avail))MB")
             completionHandler(nil)
         }
-    }
-
-    // MARK: - Tun2Socks Relay (no throttling — full speed always)
-
-    private func startTun2Socks(socksPort: Int) {
-        var fds: [Int32] = [0, 0]
-        guard socketpair(AF_UNIX, SOCK_DGRAM, 0, &fds) == 0 else {
-            fileLog("socketpair failed errno=\(errno)")
-            return
-        }
-        tunSideFd = fds[0]
-        appSideFd = fds[1]
-
-        var bufSize: Int32 = 128 * 1024
-        setsockopt(tunSideFd, SOL_SOCKET, SO_RCVBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(tunSideFd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(appSideFd, SOL_SOCKET, SO_RCVBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(appSideFd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
-
-        let flags = fcntl(appSideFd, F_GETFL)
-        _ = fcntl(appSideFd, F_SETFL, flags | O_NONBLOCK)
-        fileLog("socketpair tunFd=\(tunSideFd) appFd=\(appSideFd) buf=128KB")
-
-        readBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: readBufSize)
-
-        isRelayRunning = true
-        startReadingFromPacketFlow()
-        startReadingFromTun2Socks()
-
-        let config = """
-        tunnel:
-          mtu: 1400
-        socks5:
-          address: 127.0.0.1
-          port: \(socksPort)
-          udp: udp
-        misc:
-          task-stack-size: 20480
-          log-level: error
-        """
-        fileLog("Starting hev-socks5-tunnel -> localhost:\(socksPort)")
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            guard let configData = config.data(using: .utf8) else { return }
-            configData.withUnsafeBytes { ptr in
-                let basePtr = ptr.baseAddress!.assumingMemoryBound(to: UInt8.self)
-                let result = hev_socks5_tunnel_main_from_str(basePtr, UInt32(configData.count), self.tunSideFd)
-                self.fileLog("hev-socks5-tunnel exited code=\(result)")
-            }
-            self.isRelayRunning = false
-            self.readSource?.cancel()
-        }
-    }
-
-    /// packetFlow → tun2socks (always forward, never drop)
-    private func startReadingFromPacketFlow() {
-        packetFlow.readPackets { [weak self] packets, protocols in
-            guard let self = self, self.isRelayRunning else { return }
-
-            for (i, packet) in packets.enumerated() {
-                let protoNum = protocols[i] as! Int32
-                let afHeader = (protoNum == AF_INET6) ? Self.afInet6Header : Self.afInet4Header
-                let totalLen = 4 + packet.count
-                let written = packet.withUnsafeBytes { packetPtr -> Int in
-                    guard let packetBase = packetPtr.baseAddress else { return -1 }
-                    return afHeader.withUnsafeBytes { headerPtr -> Int in
-                        guard let headerBase = headerPtr.baseAddress else { return -1 }
-                        var iov = [
-                            iovec(iov_base: UnsafeMutableRawPointer(mutating: headerBase), iov_len: 4),
-                            iovec(iov_base: UnsafeMutableRawPointer(mutating: packetBase), iov_len: packet.count)
-                        ]
-                        return writev(self.appSideFd, &iov, 2)
-                    }
-                }
-                if written == totalLen { self.packetsSent += 1 }
-                else { self.packetsDropped += 1 }
-            }
-            self.startReadingFromPacketFlow()
-        }
-    }
-
-    /// tun2socks → packetFlow (always forward, never drop)
-    private func startReadingFromTun2Socks() {
-        let source = DispatchSource.makeReadSource(fileDescriptor: appSideFd, queue: DispatchQueue.global(qos: .userInitiated))
-        source.setEventHandler { [weak self] in
-            guard let self = self, self.isRelayRunning, let buf = self.readBuf else { return }
-
-            var batchPackets: [Data] = []
-            var batchProtos: [NSNumber] = []
-
-            while true {
-                let n = read(self.appSideFd, buf, self.readBufSize)
-                if n <= 4 { break }
-
-                let af = UInt32(buf[0]) << 24 | UInt32(buf[1]) << 16 | UInt32(buf[2]) << 8 | UInt32(buf[3])
-                let proto: NSNumber = (af == 30) ? NSNumber(value: AF_INET6) : NSNumber(value: AF_INET)
-                batchPackets.append(Data(bytes: buf + 4, count: n - 4))
-                batchProtos.append(proto)
-
-                if batchPackets.count >= 32 {
-                    self.packetFlow.writePackets(batchPackets, withProtocols: batchProtos)
-                    self.packetsRecv += UInt64(batchPackets.count)
-                    batchPackets.removeAll(keepingCapacity: true)
-                    batchProtos.removeAll(keepingCapacity: true)
-                }
-            }
-
-            if !batchPackets.isEmpty {
-                self.packetFlow.writePackets(batchPackets, withProtocols: batchProtos)
-                self.packetsRecv += UInt64(batchPackets.count)
-            }
-        }
-        source.setCancelHandler { [weak self] in self?.fileLog("dispatch source cancelled") }
-        readSource = source
-        source.resume()
-        fileLog("dispatch source started")
     }
 
     // MARK: - App Messages
@@ -397,14 +233,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             flushLog()
             var allLogs = ""
             if let containerURL = sharedContainerURL {
-                for logFile in ["tunnel.log", "antidpi-debug.log", "xray-core.log"] {
+                for logFile in ["tunnel.log"] {
                     let path = containerURL.appendingPathComponent("Logs/\(logFile)").path
                     if let data = FileManager.default.contents(atPath: path),
                        let text = String(data: data, encoding: .utf8), !text.isEmpty {
-                        let header = logFile == "xray-core.log"
-                            ? "=== \(logFile.uppercased()) (UTC) ==="
-                            : "=== \(logFile.uppercased()) ==="
-                        allLogs += header + "\n" + String(text.suffix(10000)) + "\n"
+                        allLogs += "=== \(logFile.uppercased()) ===\n" + String(text.suffix(10000)) + "\n"
                     }
                 }
             }
@@ -414,44 +247,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler?(nil)
     }
 
-    // MARK: - Network Change Detection
-
-    private func startNetworkMonitor() {
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            guard let self = self, self.isTunnelRunning else { return }
-            let desc = path.usesInterfaceType(.wifi) ? "wifi" :
-                       path.usesInterfaceType(.cellular) ? "cellular" : "other"
-            let pathKey = "\(desc)-\(path.status)"
-
-            if self.currentNetworkPath.isEmpty {
-                self.currentNetworkPath = pathKey
-                self.fileLog("Network: \(desc) (\(path.status))")
-            } else if pathKey != self.currentNetworkPath {
-                self.fileLog("Network CHANGED: \(self.currentNetworkPath) → \(pathKey) — restarting xray")
-                self.currentNetworkPath = pathKey
-                self.flushLog()
-                // Brief delay to let network stabilize
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
-                    self.restartXray()
-                }
-            }
-        }
-        monitor.start(queue: DispatchQueue.global(qos: .utility))
-        pathMonitor = monitor
-    }
-
     // MARK: - Sleep/Wake
 
     override func sleep(completionHandler: @escaping () -> Void) {
         let m = getMemoryMB()
         fileLog("SLEEP: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
+        boxService?.pause()
         completionHandler()
     }
 
     override func wake() {
         let m = getMemoryMB()
         fileLog("WAKE: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
+        boxService?.wake()
     }
 
     // MARK: - Stop
@@ -459,27 +267,99 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         let m = getMemoryMB()
         fileLog("STOP reason=\(reason.rawValue) used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
-        fileLog("stats: sent=\(packetsSent) recv=\(packetsRecv) dropped=\(packetsDropped)")
 
         isTunnelRunning = false
-        isRelayRunning = false
-
         memoryTimer?.cancel(); memoryTimer = nil
         pathMonitor?.cancel(); pathMonitor = nil
-        readSource?.cancel(); readSource = nil
 
-        if appSideFd >= 0 { close(appSideFd); appSideFd = -1 }
-        if tunSideFd >= 0 { close(tunSideFd); tunSideFd = -1 }
-        readBuf?.deallocate(); readBuf = nil
-
-        hev_socks5_tunnel_quit()
-        _ = LibXrayStopXray()
-        fileLog("xray stopped")
+        var closeError: NSError?
+        boxService?.close(&closeError)
+        if let err = closeError {
+            fileLog("sing-box close error: \(err.localizedDescription)")
+        }
+        boxService = nil
+        fileLog("sing-box stopped")
 
         flushLog()
         logTimer?.cancel(); logTimer = nil
         logFileHandle?.closeFile()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { completionHandler() }
+    }
+}
+
+// MARK: - LibboxPlatformInterface
+
+extension PacketTunnelProvider: LibboxPlatformInterface {
+    func autoDetectInterfaceControl(_ fd: Int32) throws {
+        // Not needed on iOS — NetworkExtension handles routing
+    }
+
+    func clearDNSCache() {
+        // iOS handles DNS caching
+    }
+
+    func closeDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListener)?) throws {
+        // Handled by NWPathMonitor
+    }
+
+    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32, ret0_: UnsafeMutablePointer<Int32>?) throws {
+        ret0_?.pointee = -1
+    }
+
+    func getInterfaces() throws -> (any LibboxNetworkInterfaceIterator)? {
+        return nil
+    }
+
+    func includeAllNetworks() -> Bool {
+        return false
+    }
+
+    func openTun(_ options: (any LibboxTunOptions)?, ret0_: UnsafeMutablePointer<Int32>?) throws {
+        // sing-box requests a TUN fd — use packetFlow
+        guard let fd = self.packetFlow.value(forKeyPath: "socket.fileDescriptor") as? Int32 else {
+            fileLog("ERROR: cannot get TUN fd from packetFlow")
+            throw NSError(domain: "PTP", code: -10, userInfo: [NSLocalizedDescriptionKey: "Cannot get TUN fd"])
+        }
+        ret0_?.pointee = fd
+        fileLog("openTun: fd=\(fd)")
+    }
+
+    func packageName(byUid uid: Int32) throws -> String {
+        return ""
+    }
+
+    func readWIFIState() -> LibboxWIFIState? {
+        return nil
+    }
+
+    func sendNotification(_ notification: LibboxNotification?) throws {
+        // Not implemented
+    }
+
+    func startDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListener)?) throws {
+        // Handled by NWPathMonitor
+    }
+
+    func uidByPackageName(_ packageName: String?) throws {
+        // Not needed on iOS
+    }
+
+    func underNetworkExtension() -> Bool {
+        return true
+    }
+
+    func usePlatformAutoDetectInterfaceControl() -> Bool {
+        return true
+    }
+
+    func useProcFS() -> Bool {
+        return false
+    }
+
+    func writeLog(_ message: String?) {
+        if let msg = message {
+            fileLog("[sing-box] \(msg)")
+        }
     }
 }

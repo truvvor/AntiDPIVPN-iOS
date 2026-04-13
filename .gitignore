@@ -35,3 +35,5 @@ LibXray.xcframework.bak.v20/
 LibXray.xcframework/ios-arm64_x86_64-simulator/
 HevSocks5Tunnel.xcframework/ios-arm64_x86_64-simulator/
 AntiDPIVPNUITests/
+Libbox.xcframework
+Libbox.xcframework.zip
