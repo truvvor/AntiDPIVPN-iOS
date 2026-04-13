@@ -11,6 +11,16 @@ struct RoutingSettingsView: View {
 
     var body: some View {
         Form {
+            // Master toggle
+            Section(footer: Text("When disabled, all traffic goes through VPN. Rules are preserved but not applied.")) {
+                Toggle("Enable Routing", isOn: $viewModel.globalRoute.enabled)
+                    .onChange(of: viewModel.globalRoute.enabled) { _ in
+                        viewModel.saveGlobalRoute()
+                    }
+            }
+
+            if viewModel.globalRoute.enabled {
+
             // Geo data status
             Section(header: Text("Geo Data"), footer: Text("Required for geosite: and geoip: rules. Downloaded once (~10 MB).")) {
                 HStack {
@@ -99,6 +109,8 @@ struct RoutingSettingsView: View {
                     }
                 }
             }
+
+            } // end if enabled
         }
         .scrollContentBackground(.hidden)
         .background(

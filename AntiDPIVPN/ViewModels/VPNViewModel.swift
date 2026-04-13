@@ -275,7 +275,7 @@ class VPNViewModel: ObservableObject {
 
         // If routing uses geosite/geoip, ensure geo data files are downloaded first
         let geoMgr = GeoDataManager.shared
-        if geoMgr.needsGeoData(for: globalRoute) && !geoMgr.hasGeoData {
+        if globalRoute.isActive && geoMgr.needsGeoData(for: globalRoute) && !geoMgr.hasGeoData {
             addLog("Downloading geo data for routing rules...")
             geoMgr.ensureGeoData(progress: { [weak self] msg in
                 self?.addLog(msg)

@@ -138,7 +138,7 @@ struct ConfigGenerator {
                         "settings": ["udp": true]
                     ]
                     // Only enable sniffing when routing has domain rules (needed for domain matching)
-                    let hasDomainRules = routeConfig.rules.contains { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }
+                    let hasDomainRules = routeConfig.isActive && routeConfig.rules.contains { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }
                     if hasDomainRules {
                         inbound["sniffing"] = [
                             "enabled": true,
@@ -172,7 +172,7 @@ struct ConfigGenerator {
             "outboundTag": "block"
         ] as [String: Any])
 
-        if !routeConfig.isEmpty {
+        if routeConfig.isActive {
             // Group rules by outbound tag for efficiency
             // Proxy rules go FIRST (higher priority — e.g., theins.ru must proxy despite *.ru being direct)
             let proxyRules = routeConfig.rules.filter { $0.outboundTag == "proxy" }
@@ -197,7 +197,7 @@ struct ConfigGenerator {
         }
 
         return [
-            "domainStrategy": routeConfig.isEmpty ? "AsIs" : routeConfig.domainStrategy,
+            "domainStrategy": routeConfig.isActive ? routeConfig.domainStrategy : "AsIs",
             "rules": rules
         ]
     }

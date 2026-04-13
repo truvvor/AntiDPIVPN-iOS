@@ -41,8 +41,12 @@ struct SettingsView: View {
                             HStack {
                                 Label("Routing Rules", systemImage: "arrow.triangle.branch")
                                 Spacer()
-                                if !viewModel.globalRoute.isEmpty {
+                                if viewModel.globalRoute.isActive {
                                     Text("\(viewModel.globalRoute.rules.count) rules")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                } else if !viewModel.globalRoute.isEmpty {
+                                    Text("Disabled")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 } else {
