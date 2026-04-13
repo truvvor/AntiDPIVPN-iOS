@@ -35,7 +35,7 @@ struct SingBoxConfigGenerator {
         var outbounds: [[String: Any]] = []
 
         // VLESS + REALITY + Vision
-        var vlessOutbound: [String: Any] = [
+        let vlessOutbound: [String: Any] = [
             "type": "vless",
             "tag": "proxy",
             "server": profile.serverAddress,
@@ -87,7 +87,7 @@ struct SingBoxConfigGenerator {
         // Route rules
         let route = buildRoute(routeConfig: routeConfig)
 
-        var config: [String: Any] = [
+        let config: [String: Any] = [
             "log": ["level": "warn"] as [String: Any],
             "dns": dns,
             "inbounds": inbounds,

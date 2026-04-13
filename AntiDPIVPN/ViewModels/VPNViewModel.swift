@@ -303,10 +303,9 @@ class VPNViewModel: ObservableObject {
         }
 
         addLog("Config size: \(config.count) bytes")
-        let routeInfo = expandedRoute.isActive ? "\(expandedRoute.rules.count) rules" : "no routing"
+        let routeInfo = globalRoute.isActive ? "\(globalRoute.rules.count) rules" : "no routing"
         let dnsInfo = currentProfile.dnsServers.isEmpty ? "default DNS" : currentProfile.effectiveDNS.joined(separator: ", ")
-        let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s" : "unlimited"
-        addLog("Connecting [\(routeInfo), \(dnsInfo), bw=\(bwStr)]...")
+        addLog("Connecting [\(routeInfo), \(dnsInfo)]...")
 
         vpnManager.connect(profile: currentProfile, configJSON: config)
     }

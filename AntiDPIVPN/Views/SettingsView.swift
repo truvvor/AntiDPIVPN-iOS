@@ -18,20 +18,6 @@ struct SettingsView: View {
                 .ignoresSafeArea()
 
                 Form {
-                    Section("Connection Settings") {
-                        HStack {
-                            Label("SOCKS Port", systemImage: "network")
-                            Spacer()
-                            TextField("Port", value: $viewModel.socksPort, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .keyboardType(.numberPad)
-                                .frame(width: 80)
-                        }
-
-                        Text("Default SOCKS proxy port is 3080")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
 
                     Section("Routing") {
                         NavigationLink {
