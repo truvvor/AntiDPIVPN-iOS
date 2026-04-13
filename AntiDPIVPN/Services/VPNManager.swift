@@ -81,10 +81,10 @@ class VPNManager: ObservableObject {
         proto.serverAddress = profile.serverAddress.isEmpty ? "VPN Server" : profile.serverAddress
         proto.disconnectOnSleep = false
 
-        // Pass configJSON to extension — xray runs IN the extension
         proto.providerConfiguration = [
             "configJSON": configJSON,
-            "serverAddress": profile.serverAddress
+            "serverAddress": profile.serverAddress,
+            "dnsServers": profile.effectiveDNS
         ] as [String: Any]
 
         manager.protocolConfiguration = proto

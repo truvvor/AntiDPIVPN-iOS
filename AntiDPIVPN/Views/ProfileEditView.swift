@@ -11,11 +11,13 @@ struct ProfileEditView: View {
     @State private var importURLText = ""
     @State private var importError: String? = nil
     @State private var shareURL: String = ""
+    @State private var dnsText: String = ""
 
     init(profile: VPNProfile, isNew: Bool = false) {
         _profile = State(initialValue: profile)
         _isNew = State(initialValue: isNew)
         _portString = State(initialValue: String(profile.serverPort))
+        _dnsText = State(initialValue: profile.dnsServers.joined(separator: ", "))
     }
 
     var body: some View {
@@ -107,6 +109,19 @@ struct ProfileEditView: View {
                             .font(.system(.caption, design: .monospaced))
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
+                    }
+
+                    Section(header: Text("DNS Servers"), footer: Text("Comma-separated. Empty = Google DNS (8.8.8.8). Examples: 1.1.1.1, 8.8.8.8")) {
+                        TextField("8.8.8.8, 2001:4860:4860::8888", text: $dnsText)
+                            .keyboardType(.URL)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            .onChange(of: dnsText) { newValue in
+                                profile.dnsServers = newValue
+                                    .split(separator: ",")
+                                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                                    .filter { !$0.isEmpty }
+                            }
                     }
 
                     Section {

@@ -19,6 +19,9 @@ struct VPNProfile: Identifiable, Codable {
     // Anti-DPI settings
     var antiDPISettings: AntiDPISettings = AntiDPISettings()
 
+    // DNS settings (empty = use defaults 8.8.8.8 + 2001:4860:4860::8888)
+    var dnsServers: [String] = []
+
     // Metadata
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -27,6 +30,10 @@ struct VPNProfile: Identifiable, Codable {
         case id, name, serverAddress, serverPort, uuid
         case realityPublicKey, realityShortId, realityServerName, realityFingerprint
         case nfsPublicKey
-        case antiDPISettings, createdAt, updatedAt
+        case antiDPISettings, dnsServers, createdAt, updatedAt
+    }
+
+    var effectiveDNS: [String] {
+        dnsServers.isEmpty ? ["8.8.8.8", "2001:4860:4860::8888"] : dnsServers
     }
 }

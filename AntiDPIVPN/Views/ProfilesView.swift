@@ -19,10 +19,8 @@ struct ProfilesView: View {
                             Image(systemName: "folder.badge.plus")
                                 .font(.system(size: 44))
                                 .foregroundColor(.secondary)
-
                             Text("No Profiles")
                                 .font(.headline)
-
                             Text("Create a new profile or import from URL")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
@@ -36,27 +34,22 @@ struct ProfilesView: View {
                                         HStack {
                                             Text(profile.name)
                                                 .font(.headline)
-
                                             if profile.id == viewModel.currentProfile.id {
                                                 Image(systemName: "checkmark.circle.fill")
                                                     .foregroundColor(.green)
                                                     .font(.caption)
                                             }
-
                                             Spacer()
-
                                             if profile.antiDPISettings.enabled {
                                                 Image(systemName: "shield.checkered")
                                                     .font(.caption)
                                                     .foregroundColor(.purple)
                                             }
                                         }
-
                                         HStack(spacing: 12) {
                                             Label(profile.serverAddress, systemImage: "server.rack")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
-
                                             Label("\(profile.serverPort)", systemImage: "network")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
@@ -114,15 +107,25 @@ struct ProfilesView: View {
                 if let error = importError {
                     Text(error)
                 } else {
-                    Text("Paste a VLESS share URL to create a profile")
+                    Text("Paste a VLESS or Streisand URL")
                 }
             }
         }
     }
 
     private func importFromURL() {
+        let text = importURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.lowercased().hasPrefix("streisand://") {
+            do {
+                try viewModel.importRoute(from: text)
+            } catch {
+                importError = error.localizedDescription
+                showImportURL = true
+            }
+            return
+        }
         do {
-            let profile = try VLESSURLParser.parse(importURLText)
+            let profile = try VLESSURLParser.parse(text)
             viewModel.addProfile(profile)
             importError = nil
         } catch {

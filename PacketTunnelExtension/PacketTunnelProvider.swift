@@ -1,28 +1,51 @@
 import NetworkExtension
+import Network
 import os.log
 
-/// PacketTunnelProvider — runs xray-core + hev-socks5-tunnel in extension process
+/// Build 36 — Clean single-mode, no memory throttling.
+/// Trust iOS to manage memory. If extension is killed by jetsam,
+/// iOS auto-reconnects the VPN (disconnectOnSleep=false).
+/// connIdle=30s policy handles stale connection cleanup.
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1
     private var tunSideFd: Int32 = -1
     private var isRelayRunning = false
     private var readSource: DispatchSourceRead?
-    private var packetCount: UInt64 = 0
-    private var relayedBackCount: UInt64 = 0
-    private let AF_INET_BYTES: [UInt8] = [0, 0, 0, 2]
-    private let AF_INET6_BYTES: [UInt8] = [0, 0, 0, 30]
-    private var droppedPackets: UInt64 = 0
-
-    // Synchronous file logger
-    private var logFileHandle: FileHandle?
-
-    // Memory monitor
     private var memoryTimer: DispatchSourceTimer?
+
+    // Stall detection + auto-restart
+    private var lastTrafficTotal: UInt64 = 0
+    private var stallTicks: Int = 0
+    private var savedConfigJSON: String = ""
+
+    // Network change detection
+    private var pathMonitor: NWPathMonitor?
+    private var currentNetworkPath: String = ""
+
+    // Stats
+    private var packetsSent: UInt64 = 0
+    private var packetsRecv: UInt64 = 0
+    private var packetsDropped: UInt64 = 0
+
+    // Pre-allocated read buffer (reused across events)
+    private let readBufSize = 2048
+    private var readBuf: UnsafeMutablePointer<UInt8>?
+
+    // Pre-built AF headers
+    private static let afInet4Header = Data([0, 0, 0, 2])
+    private static let afInet6Header = Data([0, 0, 0, 30])
+
+    // Logging
+    private var logFileHandle: FileHandle?
+    private var logBuffer = Data()
+    private var logTimer: DispatchSourceTimer?
 
     private var sharedContainerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.truvvor.secureconnect")
     }
+
+    // MARK: - Logging
 
     private func setupFileLogging() {
         guard let containerURL = sharedContainerURL else { return }
@@ -31,20 +54,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let logURL = logsDir.appendingPathComponent("tunnel.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         logFileHandle = FileHandle(forWritingAtPath: logURL.path)
-        fileLog("=== PacketTunnelProvider log started ===")
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler { [weak self] in self?.flushLog() }
+        logTimer = timer
+        timer.resume()
     }
 
     private func fileLog(_ message: String) {
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        let line = "[\(ts)] \(message)\n"
-        if let data = line.data(using: .utf8) {
-            logFileHandle?.write(data)
-            logFileHandle?.synchronizeFile()
+        if let data = "[\(ts)] \(message)\n".data(using: .utf8) {
+            logBuffer.append(data)
+            if logBuffer.count > 4096 { flushLog() }
         }
         os_log(.info, "PTP: %{public}@", message)
     }
 
-    private func getMemoryMB() -> (Double, Double) {
+    private func flushLog() {
+        guard !logBuffer.isEmpty else { return }
+        logFileHandle?.write(logBuffer)
+        logFileHandle?.synchronizeFile()
+        logBuffer.removeAll(keepingCapacity: true)
+    }
+
+    // MARK: - Memory (diagnostic only, no throttling)
+
+    private func getMemoryMB() -> (used: Double, avail: Double) {
         var info = mach_task_basic_info()
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
         let result = withUnsafeMutablePointer(to: &info) {
@@ -63,123 +99,144 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
-            self.fileLog("MEM: used=\(String(format: "%.1f", m.0))MB avail=\(String(format: "%.1f", m.1))MB pkts=\(self.packetCount)/\(self.relayedBackCount) drop=\(self.droppedPackets)")
-            // Emergency: if available memory drops below 15MB, log warning
-            if m.1 < 15.0 && m.1 > 0 {
-                self.fileLog("⚠️ LOW MEMORY avail=\(String(format: "%.1f", m.1))MB")
+            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
+
+            // Stall detection: if no new packets for 60s (4 ticks × 15s), restart xray
+            let currentTotal = self.packetsSent + self.packetsRecv
+            if currentTotal > 0 && currentTotal == self.lastTrafficTotal {
+                self.stallTicks += 1
+                if self.stallTicks >= 4 {
+                    self.fileLog("STALL: no traffic for 60s — restarting xray")
+                    self.flushLog()
+                    self.restartXray()
+                    self.stallTicks = 0
+                }
+            } else {
+                self.stallTicks = 0
+                self.lastTrafficTotal = currentTotal
             }
         }
         memoryTimer = timer
         timer.resume()
     }
 
-    private func isIPv6Address(_ address: String) -> Bool {
-        return address.contains(":")
+    // MARK: - Xray
+
+    /// Restart xray in-place to recover from stalled VLESS connection.
+    private func restartXray() {
+        guard !savedConfigJSON.isEmpty else {
+            fileLog("Cannot restart: no saved config")
+            return
+        }
+        let m0 = getMemoryMB()
+        fileLog("Restarting xray — MEM: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
+        _ = LibXrayStopXray()
+        usleep(300_000)
+        if startXray(configJSON: savedConfigJSON) {
+            let m1 = getMemoryMB()
+            fileLog("Xray restarted OK — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+        } else {
+            fileLog("ERROR: xray restart FAILED")
+        }
     }
 
-    // MARK: - Xray Lifecycle
-
     private func startXray(configJSON: String) -> Bool {
-        fileLog("Starting xray-core in extension...")
-        let m0 = getMemoryMB()
-        fileLog("MEM@pre-xray: used=\(String(format: "%.1f", m0.0))MB avail=\(String(format: "%.1f", m0.1))MB")
-
         guard let containerURL = sharedContainerURL else {
             fileLog("ERROR: no shared container")
             return false
         }
 
-        let logsDir = containerURL.appendingPathComponent("Logs")
-        try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
-
         let datDir = containerURL.appendingPathComponent("xray_dat").path
-        let cachePath = containerURL.appendingPathComponent("xray_cache").path
         try? FileManager.default.createDirectory(atPath: datDir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(atPath: cachePath, withIntermediateDirectories: true)
+
+        // Delete old xray_cache directory (was incorrectly used as mphCachePath)
+        let oldCacheDir = containerURL.appendingPathComponent("xray_cache").path
+        try? FileManager.default.removeItem(atPath: oldCacheDir)
+
+        // List dat files for debugging
+        let datFiles = (try? FileManager.default.contentsOfDirectory(atPath: datDir)) ?? []
+        fileLog("datDir files: \(datFiles)")
+        flushLog()
 
         let requestDict: [String: Any] = [
             "datDir": datDir,
-            "mphCachePath": cachePath,
             "configJSON": configJSON
         ]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: requestDict),
               let base64String = jsonData.base64EncodedString() as String? else {
-            fileLog("ERROR: failed to serialize xray config")
+            fileLog("ERROR: failed to serialize xray request")
+            flushLog()
             return false
         }
 
+        fileLog("xray request base64 length: \(base64String.count)")
+        let m0 = getMemoryMB()
+        fileLog("MEM@pre-xray: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
+        flushLog()
+
+        fileLog("Calling LibXrayRunXrayFromJSON...")
+        flushLog()
+
         let responseBase64 = LibXrayRunXrayFromJSON(base64String)
+
+        let m1 = getMemoryMB()
+        fileLog("LibXray returned — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+        fileLog("Response length: \(responseBase64.count)")
+
         if let responseData = Data(base64Encoded: responseBase64),
            let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
             let success = response["success"] as? Bool ?? false
-            let errMsg = response["error"] as? String ?? "unknown"
+            let errMsg = response["error"] as? String ?? ""
+            fileLog("xray response: success=\(success) error='\(errMsg)'")
+            flushLog()
             if success {
-                let m1 = getMemoryMB()
-                fileLog("xray started OK — MEM: used=\(String(format: "%.1f", m1.0))MB avail=\(String(format: "%.1f", m1.1))MB")
                 return true
             } else {
-                fileLog("xray FAILED: \(errMsg)")
                 return false
             }
         }
-        fileLog("ERROR: failed to parse xray response")
+        fileLog("ERROR: failed to decode xray response base64")
+        fileLog("Raw response: \(String(responseBase64.prefix(200)))")
+        flushLog()
         return false
     }
 
-    // MARK: - NEProvider Lifecycle
+    // MARK: - Tunnel Lifecycle
 
-    override func sleep(completionHandler: @escaping () -> Void) {
-        let m = getMemoryMB()
-        fileLog("SLEEP: used=\(String(format: "%.1f", m.0))MB avail=\(String(format: "%.1f", m.1))MB")
-        completionHandler()
+    private func isIPv6Address(_ address: String) -> Bool {
+        address.contains(":")
     }
-
-    override func wake() {
-        let m = getMemoryMB()
-        fileLog("WAKE: used=\(String(format: "%.1f", m.0))MB avail=\(String(format: "%.1f", m.1))MB")
-    }
-
-    // MARK: - Tunnel
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
-        fileLog("Starting tunnel (build 24) — xray IN extension, aggressive mem mgmt")
-
         let m0 = getMemoryMB()
-        fileLog("MEM@start: used=\(String(format: "%.1f", m0.0))MB avail=\(String(format: "%.1f", m0.1))MB")
+        fileLog("Starting tunnel (build 38) — routing, DNS, keepalive")
+        fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
-              let providerConfig = protocolConfig.providerConfiguration else {
-            completionHandler(NSError(domain: "PTP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing config"]))
+              let providerConfig = protocolConfig.providerConfiguration,
+              let configJSON = providerConfig["configJSON"] as? String, !configJSON.isEmpty else {
+            completionHandler(NSError(domain: "PTP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing or empty config"]))
             return
         }
 
-        let configJSON = providerConfig["configJSON"] as? String ?? ""
         let serverAddress = providerConfig["serverAddress"] as? String ?? ""
+        let dnsServers = providerConfig["dnsServers"] as? [String] ?? ["8.8.8.8", "2001:4860:4860::8888"]
         fileLog("configJSON length=\(configJSON.count) server=\(serverAddress)")
+        // Log first 2000 chars of config for debugging routing issues
+        fileLog("CONFIG: \(String(configJSON.prefix(2000)))")
+        flushLog()
 
-        guard !configJSON.isEmpty else {
-            fileLog("ERROR: empty configJSON — cannot start xray")
-            completionHandler(NSError(domain: "PTP", code: -2, userInfo: [NSLocalizedDescriptionKey: "Empty configJSON"]))
-            return
-        }
-
-        // STEP 1: Start xray-core in extension process
+        savedConfigJSON = configJSON
         guard startXray(configJSON: configJSON) else {
             completionHandler(NSError(domain: "PTP", code: -3, userInfo: [NSLocalizedDescriptionKey: "Xray failed to start"]))
             return
         }
 
-        let socksPort = 3080
-        let tunnelRemote: String
-        if serverAddress.isEmpty || isIPv6Address(serverAddress) {
-            tunnelRemote = "254.1.1.1"
-        } else {
-            tunnelRemote = serverAddress
-        }
+        let tunnelRemote = (serverAddress.isEmpty || isIPv6Address(serverAddress)) ? "254.1.1.1" : serverAddress
 
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelRemote)
-        settings.mtu = 1500
+        settings.mtu = 1400
 
         let ipv4 = NEIPv4Settings(addresses: ["198.18.0.1"], subnetMasks: ["255.255.255.0"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
@@ -195,40 +252,50 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             ipv6.excludedRoutes = [NEIPv6Route(destinationAddress: serverAddress, networkPrefixLength: 128)]
         }
         settings.ipv6Settings = ipv6
-        settings.dnsSettings = NEDNSSettings(servers: ["8.8.8.8", "2001:4860:4860::8888"])
+        settings.dnsSettings = NEDNSSettings(servers: dnsServers)
+        fileLog("DNS: \(dnsServers.joined(separator: ", "))")
 
         setTunnelNetworkSettings(settings) { [weak self] error in
+            guard let self = self else { return }
             if let error = error {
-                self?.fileLog("setTunnelNetworkSettings failed: \(error.localizedDescription)")
+                self.fileLog("setTunnelNetworkSettings failed: \(error.localizedDescription)")
                 completionHandler(error)
                 return
             }
-            self?.fileLog("Network settings applied")
+            self.fileLog("Network settings applied")
 
-            // STEP 2: Start tun2socks relay to xray's SOCKS5 on localhost
-            self?.startTun2Socks(socksPort: socksPort)
-            self?.isTunnelRunning = true
-            self?.startMemoryMonitor()
-            let m1 = self?.getMemoryMB() ?? (0.0, 0.0)
-            self?.fileLog("MEM@ready: used=\(String(format: "%.1f", m1.0))MB avail=\(String(format: "%.1f", m1.1))MB")
+            self.startTun2Socks(socksPort: 3080)
+            self.isTunnelRunning = true
+            self.startMemoryMonitor()
+            self.startNetworkMonitor()
+            let m1 = self.getMemoryMB()
+            self.fileLog("MEM@ready: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
             completionHandler(nil)
         }
     }
 
+    // MARK: - Tun2Socks Relay (no throttling — full speed always)
+
     private func startTun2Socks(socksPort: Int) {
         var fds: [Int32] = [0, 0]
-        let ret = socketpair(AF_UNIX, SOCK_DGRAM, 0, &fds)
-        guard ret == 0 else { fileLog("socketpair failed errno=\(errno)"); return }
-        tunSideFd = fds[0]; appSideFd = fds[1]
+        guard socketpair(AF_UNIX, SOCK_DGRAM, 0, &fds) == 0 else {
+            fileLog("socketpair failed errno=\(errno)")
+            return
+        }
+        tunSideFd = fds[0]
+        appSideFd = fds[1]
 
-        var bufSize: Int32 = 2 * 1024 * 1024
+        var bufSize: Int32 = 128 * 1024
         setsockopt(tunSideFd, SOL_SOCKET, SO_RCVBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(tunSideFd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(appSideFd, SOL_SOCKET, SO_RCVBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(appSideFd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
+
         let flags = fcntl(appSideFd, F_GETFL)
-        let _ = fcntl(appSideFd, F_SETFL, flags | O_NONBLOCK)
-        fileLog("socketpair tunFd=\(tunSideFd) appFd=\(appSideFd) buf=2MB")
+        _ = fcntl(appSideFd, F_SETFL, flags | O_NONBLOCK)
+        fileLog("socketpair tunFd=\(tunSideFd) appFd=\(appSideFd) buf=128KB")
+
+        readBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: readBufSize)
 
         isRelayRunning = true
         startReadingFromPacketFlow()
@@ -236,14 +303,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let config = """
         tunnel:
-          mtu: 1500
+          mtu: 1400
         socks5:
           address: 127.0.0.1
           port: \(socksPort)
           udp: udp
         misc:
-          task-stack-size: 81920
-          log-level: warning
+          task-stack-size: 20480
+          log-level: error
         """
         fileLog("Starting hev-socks5-tunnel -> localhost:\(socksPort)")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -259,40 +326,62 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    /// packetFlow → tun2socks (always forward, never drop)
     private func startReadingFromPacketFlow() {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self = self, self.isRelayRunning else { return }
+
             for (i, packet) in packets.enumerated() {
                 let protoNum = protocols[i] as! Int32
-                let afHeader = (protoNum == AF_INET6) ? self.AF_INET6_BYTES : self.AF_INET_BYTES
-                var framedPacket = Data(afHeader)
-                framedPacket.append(packet)
-                let written = framedPacket.withUnsafeBytes { ptr -> Int in
-                    guard let base = ptr.baseAddress else { return -1 }
-                    return write(self.appSideFd, base, framedPacket.count)
+                let afHeader = (protoNum == AF_INET6) ? Self.afInet6Header : Self.afInet4Header
+                let totalLen = 4 + packet.count
+                let written = packet.withUnsafeBytes { packetPtr -> Int in
+                    guard let packetBase = packetPtr.baseAddress else { return -1 }
+                    return afHeader.withUnsafeBytes { headerPtr -> Int in
+                        guard let headerBase = headerPtr.baseAddress else { return -1 }
+                        var iov = [
+                            iovec(iov_base: UnsafeMutableRawPointer(mutating: headerBase), iov_len: 4),
+                            iovec(iov_base: UnsafeMutableRawPointer(mutating: packetBase), iov_len: packet.count)
+                        ]
+                        return writev(self.appSideFd, &iov, 2)
+                    }
                 }
-                if written < 0 { self.droppedPackets += 1 }
-                else { self.packetCount += 1 }
+                if written == totalLen { self.packetsSent += 1 }
+                else { self.packetsDropped += 1 }
             }
             self.startReadingFromPacketFlow()
         }
     }
 
+    /// tun2socks → packetFlow (always forward, never drop)
     private func startReadingFromTun2Socks() {
         let source = DispatchSource.makeReadSource(fileDescriptor: appSideFd, queue: DispatchQueue.global(qos: .userInitiated))
         source.setEventHandler { [weak self] in
-            guard let self = self, self.isRelayRunning else { return }
-            let bufSize = 65536
-            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
-            defer { buf.deallocate() }
+            guard let self = self, self.isRelayRunning, let buf = self.readBuf else { return }
+
+            var batchPackets: [Data] = []
+            var batchProtos: [NSNumber] = []
+
             while true {
-                let n = read(self.appSideFd, buf, bufSize)
+                let n = read(self.appSideFd, buf, self.readBufSize)
                 if n <= 4 { break }
-                let ipPacket = Data(bytes: buf + 4, count: n - 4)
+
                 let af = UInt32(buf[0]) << 24 | UInt32(buf[1]) << 16 | UInt32(buf[2]) << 8 | UInt32(buf[3])
                 let proto: NSNumber = (af == 30) ? NSNumber(value: AF_INET6) : NSNumber(value: AF_INET)
-                self.packetFlow.writePackets([ipPacket], withProtocols: [proto])
-                self.relayedBackCount += 1
+                batchPackets.append(Data(bytes: buf + 4, count: n - 4))
+                batchProtos.append(proto)
+
+                if batchPackets.count >= 32 {
+                    self.packetFlow.writePackets(batchPackets, withProtocols: batchProtos)
+                    self.packetsRecv += UInt64(batchPackets.count)
+                    batchPackets.removeAll(keepingCapacity: true)
+                    batchProtos.removeAll(keepingCapacity: true)
+                }
+            }
+
+            if !batchPackets.isEmpty {
+                self.packetFlow.writePackets(batchPackets, withProtocols: batchProtos)
+                self.packetsRecv += UInt64(batchPackets.count)
             }
         }
         source.setCancelHandler { [weak self] in self?.fileLog("dispatch source cancelled") }
@@ -301,20 +390,21 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         fileLog("dispatch source started")
     }
 
+    // MARK: - App Messages
+
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
         if let command = String(data: messageData, encoding: .utf8), command == "getLogs" {
+            flushLog()
             var allLogs = ""
             if let containerURL = sharedContainerURL {
-                let tunnelLogPath = containerURL.appendingPathComponent("Logs/tunnel.log").path
-                if let data = FileManager.default.contents(atPath: tunnelLogPath),
-                   let text = String(data: data, encoding: .utf8) {
-                    allLogs += "=== TUNNEL LOG ===\n" + text + "\n"
-                }
-                for logFile in ["antidpi-debug.log", "xray-core.log"] {
+                for logFile in ["tunnel.log", "antidpi-debug.log", "xray-core.log"] {
                     let path = containerURL.appendingPathComponent("Logs/\(logFile)").path
                     if let data = FileManager.default.contents(atPath: path),
-                       let text = String(data: data, encoding: .utf8) {
-                        allLogs += "=== \(logFile.uppercased()) ===\n" + String(text.suffix(10000)) + "\n"
+                       let text = String(data: data, encoding: .utf8), !text.isEmpty {
+                        let header = logFile == "xray-core.log"
+                            ? "=== \(logFile.uppercased()) (UTC) ==="
+                            : "=== \(logFile.uppercased()) ==="
+                        allLogs += header + "\n" + String(text.suffix(10000)) + "\n"
                     }
                 }
             }
@@ -324,21 +414,72 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler?(nil)
     }
 
+    // MARK: - Network Change Detection
+
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self, self.isTunnelRunning else { return }
+            let desc = path.usesInterfaceType(.wifi) ? "wifi" :
+                       path.usesInterfaceType(.cellular) ? "cellular" : "other"
+            let pathKey = "\(desc)-\(path.status)"
+
+            if self.currentNetworkPath.isEmpty {
+                self.currentNetworkPath = pathKey
+                self.fileLog("Network: \(desc) (\(path.status))")
+            } else if pathKey != self.currentNetworkPath {
+                self.fileLog("Network CHANGED: \(self.currentNetworkPath) → \(pathKey) — restarting xray")
+                self.currentNetworkPath = pathKey
+                self.flushLog()
+                // Brief delay to let network stabilize
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
+                    self.restartXray()
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        pathMonitor = monitor
+    }
+
+    // MARK: - Sleep/Wake
+
+    override func sleep(completionHandler: @escaping () -> Void) {
+        let m = getMemoryMB()
+        fileLog("SLEEP: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
+        completionHandler()
+    }
+
+    override func wake() {
+        let m = getMemoryMB()
+        fileLog("WAKE: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
+    }
+
+    // MARK: - Stop
+
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         let m = getMemoryMB()
-        fileLog("STOP reason=\(reason.rawValue) used=\(String(format: "%.1f", m.0))MB avail=\(String(format: "%.1f", m.1))MB")
-        fileLog("stats: sent=\(packetCount) recv=\(relayedBackCount) dropped=\(droppedPackets)")
-        isTunnelRunning = false; isRelayRunning = false
+        fileLog("STOP reason=\(reason.rawValue) used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
+        fileLog("stats: sent=\(packetsSent) recv=\(packetsRecv) dropped=\(packetsDropped)")
+
+        isTunnelRunning = false
+        isRelayRunning = false
+
         memoryTimer?.cancel(); memoryTimer = nil
+        pathMonitor?.cancel(); pathMonitor = nil
         readSource?.cancel(); readSource = nil
+
         if appSideFd >= 0 { close(appSideFd); appSideFd = -1 }
         if tunSideFd >= 0 { close(tunSideFd); tunSideFd = -1 }
+        readBuf?.deallocate(); readBuf = nil
+
         hev_socks5_tunnel_quit()
-        // Stop xray-core
-        let _ = LibXrayStopXray()
+        _ = LibXrayStopXray()
         fileLog("xray stopped")
-        logFileHandle?.synchronizeFile()
+
+        flushLog()
+        logTimer?.cancel(); logTimer = nil
         logFileHandle?.closeFile()
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { completionHandler() }
     }
 }
