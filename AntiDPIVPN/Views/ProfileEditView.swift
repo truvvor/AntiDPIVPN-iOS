@@ -11,9 +11,6 @@ struct ProfileEditView: View {
     @State private var importURLText = ""
     @State private var importError: String? = nil
     @State private var shareURL: String = ""
-    @State private var showRouteImport = false
-    @State private var routeImportText = ""
-    @State private var routeImportError: String? = nil
     @State private var dnsText: String = ""
 
     init(profile: VPNProfile, isNew: Bool = false) {
@@ -134,50 +131,6 @@ struct ProfileEditView: View {
                             }
                     }
 
-                    Section(header: Text("Routing"), footer: routeFooter) {
-                        if profile.routeConfig.isEmpty {
-                            Button(action: {
-                                if let text = UIPasteboard.general.string,
-                                   text.lowercased().hasPrefix("streisand://") {
-                                    routeImportText = text
-                                } else {
-                                    routeImportText = ""
-                                }
-                                routeImportError = nil
-                                showRouteImport = true
-                            }) {
-                                Label("Import Route from Streisand", systemImage: "arrow.triangle.branch")
-                            }
-                        } else {
-                            HStack {
-                                Label(profile.routeConfig.name, systemImage: "arrow.triangle.branch")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(profile.routeConfig.rules.count) rules")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-
-                            NavigationLink("View Rules") {
-                                RouteRulesView(routeConfig: profile.routeConfig)
-                            }
-
-                            Button(role: .destructive) {
-                                profile.routeConfig = RouteConfig()
-                            } label: {
-                                Label("Remove Route", systemImage: "trash")
-                            }
-
-                            Button(action: {
-                                routeImportText = ""
-                                routeImportError = nil
-                                showRouteImport = true
-                            }) {
-                                Label("Replace Route", systemImage: "arrow.triangle.branch")
-                            }
-                        }
-                    }
-
                     Section {
                         NavigationLink("Anti-DPI Settings", destination: AntiDPISettingsView(settings: $profile.antiDPISettings, viewModel: viewModel))
                     }
@@ -242,93 +195,6 @@ struct ProfileEditView: View {
                     Text("Paste a VLESS share URL")
                 }
             }
-            .alert("Import Route", isPresented: $showRouteImport) {
-                TextField("streisand://...", text: $routeImportText)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                Button("Import") {
-                    do {
-                        let parsed = try StreisandRouteParser.parse(routeImportText)
-                        profile.routeConfig = parsed
-                        routeImportError = nil
-                    } catch {
-                        routeImportError = error.localizedDescription
-                        showRouteImport = true
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                if let error = routeImportError {
-                    Text(error)
-                } else {
-                    Text("Paste a Streisand route URL")
-                }
-            }
-        }
-    }
-
-    private var routeFooter: Text {
-        if profile.routeConfig.isEmpty {
-            return Text("Split tunneling: route Russian sites directly, blocked sites through VPN.")
-        } else {
-            return Text("Strategy: \(profile.routeConfig.domainStrategy)")
-        }
-    }
-}
-
-// MARK: - Route Rules View
-
-struct RouteRulesView: View {
-    let routeConfig: RouteConfig
-
-    var body: some View {
-        List {
-            ForEach(routeConfig.rules) { rule in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Image(systemName: iconForTag(rule.outboundTag))
-                            .foregroundColor(colorForTag(rule.outboundTag))
-                        Text(rule.outboundTag.uppercased())
-                            .font(.caption.bold())
-                            .foregroundColor(colorForTag(rule.outboundTag))
-                        Spacer()
-                        Text(rule.type.rawValue)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Text(rule.values.prefix(5).joined(separator: "\n"))
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundColor(.primary)
-
-                    if rule.values.count > 5 {
-                        Text("... +\(rule.values.count - 5) more")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-        .navigationTitle(routeConfig.name)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func iconForTag(_ tag: String) -> String {
-        switch tag {
-        case "direct": return "arrow.right"
-        case "proxy": return "shield.fill"
-        case "block": return "xmark.circle"
-        default: return "questionmark.circle"
-        }
-    }
-
-    private func colorForTag(_ tag: String) -> Color {
-        switch tag {
-        case "direct": return .green
-        case "proxy": return .blue
-        case "block": return .red
-        default: return .gray
         }
     }
 }

@@ -6,9 +6,6 @@ struct ProfilesView: View {
     @State private var showImportURL = false
     @State private var importURLText = ""
     @State private var importError: String? = nil
-    @State private var showRouteImport = false
-    @State private var routeImportText = ""
-    @State private var routeImportError: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -29,10 +26,8 @@ struct ProfilesView: View {
                             Image(systemName: "folder.badge.plus")
                                 .font(.system(size: 44))
                                 .foregroundColor(.secondary)
-
                             Text("No Profiles")
                                 .font(.headline)
-
                             Text("Create a new profile or import from URL")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
@@ -46,42 +41,25 @@ struct ProfilesView: View {
                                         HStack {
                                             Text(profile.name)
                                                 .font(.headline)
-
                                             if profile.id == viewModel.currentProfile.id {
                                                 Image(systemName: "checkmark.circle.fill")
                                                     .foregroundColor(.green)
                                                     .font(.caption)
                                             }
-
                                             Spacer()
-
-                                            if !profile.routeConfig.isEmpty {
-                                                Image(systemName: "arrow.triangle.branch")
-                                                    .font(.caption)
-                                                    .foregroundColor(.orange)
-                                            }
-
                                             if profile.antiDPISettings.enabled {
                                                 Image(systemName: "shield.checkered")
                                                     .font(.caption)
                                                     .foregroundColor(.purple)
                                             }
                                         }
-
                                         HStack(spacing: 12) {
                                             Label(profile.serverAddress, systemImage: "server.rack")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
-
                                             Label("\(profile.serverPort)", systemImage: "network")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
-
-                                            if !profile.routeConfig.isEmpty {
-                                                Label("\(profile.routeConfig.rules.count) rules", systemImage: "arrow.triangle.branch")
-                                                    .font(.caption)
-                                                    .foregroundColor(.orange)
-                                            }
                                         }
                                     }
                                     .contentShape(Rectangle())
@@ -107,32 +85,13 @@ struct ProfilesView: View {
                         Button(action: { showAddProfile = true }) {
                             Label("New Profile", systemImage: "plus")
                         }
-
-                        Divider()
-
                         Button(action: {
                             importURLText = ""
                             importError = nil
                             showImportURL = true
                         }) {
-                            Label("Import VLESS URL", systemImage: "link.badge.plus")
+                            Label("Import from URL", systemImage: "link.badge.plus")
                         }
-                        Button(action: {
-                            // Pre-fill from clipboard if it looks like streisand
-                            if let text = UIPasteboard.general.string,
-                               text.lowercased().hasPrefix("streisand://") {
-                                routeImportText = text
-                            } else {
-                                routeImportText = ""
-                            }
-                            routeImportError = nil
-                            showRouteImport = true
-                        }) {
-                            Label("Import Streisand Route", systemImage: "arrow.triangle.branch")
-                        }
-
-                        Divider()
-
                         Button(action: importFromClipboard) {
                             Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
                         }
@@ -145,7 +104,7 @@ struct ProfilesView: View {
                 ProfileEditView(profile: VPNProfile(), isNew: true)
                     .environmentObject(viewModel)
             }
-            .alert("Import VLESS URL", isPresented: $showImportURL) {
+            .alert("Import from URL", isPresented: $showImportURL) {
                 TextField("vless://...", text: $importURLText)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
@@ -155,20 +114,7 @@ struct ProfilesView: View {
                 if let error = importError {
                     Text(error)
                 } else {
-                    Text("Paste a VLESS share URL to create a profile")
-                }
-            }
-            .alert("Import Streisand Route", isPresented: $showRouteImport) {
-                TextField("streisand://...", text: $routeImportText)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                Button("Import") { importRoute() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                if let error = routeImportError {
-                    Text(error)
-                } else {
-                    Text("Paste a Streisand route URL to add routing rules to the current profile")
+                    Text("Paste a VLESS or Streisand URL")
                 }
             }
         }
@@ -176,10 +122,13 @@ struct ProfilesView: View {
 
     private func importFromURL() {
         let text = importURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Auto-detect streisand URLs
         if text.lowercased().hasPrefix("streisand://") {
-            routeImportText = text
-            importFromRoute()
+            do {
+                try viewModel.importRoute(from: text)
+            } catch {
+                importError = error.localizedDescription
+                showImportURL = true
+            }
             return
         }
         do {
@@ -192,39 +141,14 @@ struct ProfilesView: View {
         }
     }
 
-    private func importRoute() {
-        importFromRoute()
-    }
-
-    private func importFromRoute() {
-        do {
-            let route = try StreisandRouteParser.parse(routeImportText)
-            var profile = viewModel.currentProfile
-            profile.routeConfig = route
-            viewModel.updateProfile(profile)
-            viewModel.setCurrentProfile(profile)
-            routeImportError = nil
-            viewModel.addLog("Imported route '\(route.name)' with \(route.rules.count) rules")
-        } catch {
-            routeImportError = error.localizedDescription
-            showRouteImport = true
-        }
-    }
-
     private func importFromClipboard() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else {
             importError = "Clipboard is empty"
             showImportURL = true
             return
         }
-        // Auto-detect URL type
-        if text.lowercased().hasPrefix("streisand://") {
-            routeImportText = text
-            importFromRoute()
-        } else {
-            importURLText = text
-            importFromURL()
-        }
+        importURLText = text
+        importFromURL()
     }
 }
 

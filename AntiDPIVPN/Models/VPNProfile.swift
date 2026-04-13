@@ -22,9 +22,6 @@ struct VPNProfile: Identifiable, Codable {
     // DNS settings (empty = use defaults 8.8.8.8 + 2001:4860:4860::8888)
     var dnsServers: [String] = []
 
-    // Routing config (imported from Streisand or manual)
-    var routeConfig: RouteConfig = RouteConfig()
-
     // Metadata
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -33,10 +30,9 @@ struct VPNProfile: Identifiable, Codable {
         case id, name, serverAddress, serverPort, uuid
         case realityPublicKey, realityShortId, realityServerName, realityFingerprint
         case nfsPublicKey
-        case antiDPISettings, dnsServers, routeConfig, createdAt, updatedAt
+        case antiDPISettings, dnsServers, createdAt, updatedAt
     }
 
-    /// Effective DNS servers (custom or defaults).
     var effectiveDNS: [String] {
         dnsServers.isEmpty ? ["8.8.8.8", "2001:4860:4860::8888"] : dnsServers
     }

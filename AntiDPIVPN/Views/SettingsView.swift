@@ -33,6 +33,28 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
+                    Section("Routing") {
+                        NavigationLink {
+                            RoutingSettingsView()
+                                .environmentObject(viewModel)
+                        } label: {
+                            HStack {
+                                Label("Routing Rules", systemImage: "arrow.triangle.branch")
+                                Spacer()
+                                if !viewModel.globalRoute.isEmpty {
+                                    Text("\(viewModel.globalRoute.rules.count) rules")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("None")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .foregroundColor(.primary)
+                        }
+                    }
+
                     Section("Xray Information") {
                         HStack {
                             Label("Version", systemImage: "info.circle")

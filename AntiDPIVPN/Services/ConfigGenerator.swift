@@ -2,7 +2,7 @@ import Foundation
 
 struct ConfigGenerator {
     /// Generate xray JSON config with routing and custom DNS support.
-    static func generateXrayConfig(from profile: VPNProfile, bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
+    static func generateXrayConfig(from profile: VPNProfile, routeConfig: RouteConfig = RouteConfig(), bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
         let encryptionField: String
         if profile.antiDPISettings.enabled && !profile.nfsPublicKey.isEmpty {
             encryptionField = "mlkem768x25519plus.native.0rtt.\(profile.nfsPublicKey)"
@@ -70,7 +70,7 @@ struct ConfigGenerator {
         ]
 
         // Build routing rules
-        let routing = buildRouting(from: profile.routeConfig)
+        let routing = buildRouting(from: routeConfig)
 
         // Build DNS config
         let dns = buildDNS(servers: profile.effectiveDNS)
@@ -130,16 +130,23 @@ struct ConfigGenerator {
             "dns": dns,
             "routing": routing,
             "inbounds": [
-                [
-                    "listen": "127.0.0.1",
-                    "port": 3080,
-                    "protocol": "socks",
-                    "settings": ["udp": true],
-                    "sniffing": [
-                        "enabled": true,
-                        "destOverride": ["http", "tls"]
-                    ] as [String: Any]
-                ] as [String: Any]
+                {
+                    var inbound: [String: Any] = [
+                        "listen": "127.0.0.1",
+                        "port": 3080,
+                        "protocol": "socks",
+                        "settings": ["udp": true]
+                    ]
+                    // Only enable sniffing when routing has domain rules (needed for domain matching)
+                    let hasDomainRules = routeConfig.rules.contains { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }
+                    if hasDomainRules {
+                        inbound["sniffing"] = [
+                            "enabled": true,
+                            "destOverride": ["http", "tls"]
+                        ] as [String: Any]
+                    }
+                    return inbound
+                }()
             ],
             "outbounds": outbounds
         ]

@@ -13,6 +13,7 @@ class VPNViewModel: ObservableObject {
     @Published var logs: [String] = []
     @Published var adaptiveLevel: Int = 3
     @Published var adaptiveStatus: String = ""
+    @Published var globalRoute: RouteConfig = RouteConfig()
 
     private var sharedContainerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.truvvor.secureconnect")
@@ -22,6 +23,7 @@ class VPNViewModel: ObservableObject {
     private let profilesUserDefaultsKey = "vpn_profiles"
     private let currentProfileUserDefaultsKey = "current_profile"
     private let adaptiveLevelKey = "adaptive_level"
+    private let globalRouteKey = "global_route_config"
     private var connectionStartTime: Date?
     private var reconnectTimer: Timer?
     private var stabilityTimer: Timer?
@@ -44,6 +46,7 @@ class VPNViewModel: ObservableObject {
         loadProfiles()
         loadCurrentProfile()
         loadAdaptiveLevel()
+        loadGlobalRoute()
         updateVersion()
     }
 
@@ -150,6 +153,43 @@ class VPNViewModel: ObservableObject {
         addLog("[Adaptive] Reset to default level 3")
     }
 
+    // MARK: - Global Route
+
+    func loadGlobalRoute() {
+        if let data = UserDefaults.standard.data(forKey: globalRouteKey),
+           let decoded = try? JSONDecoder().decode(RouteConfig.self, from: data) {
+            self.globalRoute = decoded
+        }
+    }
+
+    func saveGlobalRoute() {
+        if let encoded = try? JSONEncoder().encode(globalRoute) {
+            UserDefaults.standard.set(encoded, forKey: globalRouteKey)
+        }
+    }
+
+    func importRoute(from urlString: String) throws {
+        let route = try StreisandRouteParser.parse(urlString)
+        globalRoute = route
+        saveGlobalRoute()
+        addLog("Imported route '\(route.name)' with \(route.rules.count) rules")
+    }
+
+    func addRule(_ rule: RouteRule) {
+        globalRoute.rules.append(rule)
+        saveGlobalRoute()
+    }
+
+    func deleteRule(at offsets: IndexSet) {
+        globalRoute.rules.remove(atOffsets: offsets)
+        saveGlobalRoute()
+    }
+
+    func clearRoute() {
+        globalRoute = RouteConfig()
+        saveGlobalRoute()
+    }
+
     // MARK: - VPN Connection
 
     func loadProfiles() {
@@ -235,7 +275,7 @@ class VPNViewModel: ObservableObject {
 
         // If routing uses geosite/geoip, ensure geo data files are downloaded first
         let geoMgr = GeoDataManager.shared
-        if geoMgr.needsGeoData(for: currentProfile.routeConfig) && !geoMgr.hasGeoData {
+        if geoMgr.needsGeoData(for: globalRoute) && !geoMgr.hasGeoData {
             addLog("Downloading geo data for routing rules...")
             geoMgr.ensureGeoData(progress: { [weak self] msg in
                 self?.addLog(msg)
@@ -270,13 +310,13 @@ class VPNViewModel: ObservableObject {
         }
 
         guard let config = ConfigGenerator.generateXrayConfig(
-            from: currentProfile, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
+            from: currentProfile, routeConfig: globalRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
         ) else {
             addLog("Failed to generate Xray config")
             return
         }
 
-        let routeInfo = currentProfile.routeConfig.isEmpty ? "no routing" : "\(currentProfile.routeConfig.rules.count) rules"
+        let routeInfo = globalRoute.isEmpty ? "no routing" : "\(globalRoute.rules.count) rules"
         let dnsInfo = currentProfile.dnsServers.isEmpty ? "default DNS" : currentProfile.effectiveDNS.joined(separator: ", ")
         let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s" : "unlimited"
         addLog("Connecting [\(routeInfo), \(dnsInfo), bw=\(bwStr)]...")
