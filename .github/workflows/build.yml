@@ -31,6 +31,8 @@ jobs:
           echo "=== Signing identities ==="
           security find-identity -v -p codesigning
 
+          KEYCHAIN_PATH="$HOME/Library/Keychains/login.keychain-db"
+
           # Archive
           xcodebuild -scheme AntiDPIVPN \
             -sdk iphoneos \
@@ -39,17 +41,18 @@ jobs:
             archive \
             -allowProvisioningUpdates \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=WJWU38ALPB
+            DEVELOPMENT_TEAM=WJWU38ALPB \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
 
-          # Create ExportOptions
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>method</key>\n  <string>app-store-connect</string>\n  <key>uploadSymbols</key>\n  <false/>\n  <key>signingStyle</key>\n  <string>automatic</string>\n  <key>teamID</key>\n  <string>WJWU38ALPB</string>\n</dict>\n</plist>\n' > $RUNNER_TEMP/ExportOptions.plist
+          # Create ExportOptions          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>method</key>\n  <string>app-store-connect</string>\n  <key>uploadSymbols</key>\n  <false/>\n  <key>signingStyle</key>\n  <string>automatic</string>\n  <key>teamID</key>\n  <string>WJWU38ALPB</string>\n</dict>\n</plist>\n' > $RUNNER_TEMP/ExportOptions.plist
 
           # Export IPA
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -exportPath $RUNNER_TEMP/export \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -allowProvisioningUpdates
+            -allowProvisioningUpdates \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
 
           # Upload to TestFlight
           xcrun altool --upload-app \
