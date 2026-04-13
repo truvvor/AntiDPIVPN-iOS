@@ -72,8 +72,8 @@ struct ConfigGenerator {
         // Build routing rules
         let routing = buildRouting(from: routeConfig)
 
-        // Build DNS config
-        let dns = buildDNS(servers: profile.effectiveDNS)
+        // DNS handled by system (NEDNSSettings) — xray dns section causes
+        // circular dependency: xray tries to resolve DNS through VPN that needs DNS.
 
         let muxSettings: [String: Any] = [
             "enabled": false,
@@ -127,7 +127,6 @@ struct ConfigGenerator {
         var config: [String: Any] = [
             "log": logConfig,
             "policy": policy,
-            "dns": dns,
             "routing": routing,
             "inbounds": [
                 {
@@ -230,12 +229,4 @@ struct ConfigGenerator {
         return xrayRule
     }
 
-    // MARK: - DNS
-
-    /// Build xray DNS config.
-    private static func buildDNS(servers: [String]) -> [String: Any] {
-        return [
-            "servers": servers
-        ]
-    }
 }

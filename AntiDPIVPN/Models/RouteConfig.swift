@@ -20,7 +20,7 @@ struct RouteRule: Codable, Identifiable {
 struct RouteConfig: Codable, Identifiable {
     var id = UUID()
     var name: String = ""
-    var enabled: Bool = true
+    var enabled: Bool = false
     var domainStrategy: String = "IPIfNonMatch"
     var rules: [RouteRule] = []
 
