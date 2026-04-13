@@ -79,11 +79,12 @@ struct StreisandRouteParser {
                 var regexps: [String] = []
                 var plainDomains: [String] = []
 
-                for d in domains {
+                for d in domains where !d.isEmpty {
                     if d.hasPrefix("geosite:") {
                         geosites.append(d)
                     } else if d.hasPrefix("regexp:") {
-                        regexps.append(String(d.dropFirst("regexp:".count)))
+                        let pattern = String(d.dropFirst("regexp:".count))
+                        if !pattern.isEmpty { regexps.append(pattern) }
                     } else {
                         plainDomains.append(d)
                     }

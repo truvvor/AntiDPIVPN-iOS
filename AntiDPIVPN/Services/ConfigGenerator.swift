@@ -200,7 +200,8 @@ struct ConfigGenerator {
 
     /// Convert a RouteRule to xray routing rule format.
     private static func convertRule(_ rule: RouteRule) -> [String: Any]? {
-        guard !rule.values.isEmpty else { return nil }
+        let cleanValues = rule.values.filter { !$0.isEmpty }
+        guard !cleanValues.isEmpty else { return nil }
 
         var xrayRule: [String: Any] = [
             "type": "field",
@@ -209,18 +210,15 @@ struct ConfigGenerator {
 
         switch rule.type {
         case .domain:
-            xrayRule["domain"] = rule.values
+            xrayRule["domain"] = cleanValues
         case .geosite:
-            // geosite values already have "geosite:" prefix
-            xrayRule["domain"] = rule.values
+            xrayRule["domain"] = cleanValues
         case .geoip:
-            // geoip values already have "geoip:" prefix
-            xrayRule["ip"] = rule.values
+            xrayRule["ip"] = cleanValues
         case .regexp:
-            // Wrap in regexp: prefix for xray
-            xrayRule["domain"] = rule.values.map { "regexp:\($0)" }
+            xrayRule["domain"] = cleanValues.map { "regexp:\($0)" }
         case .port:
-            xrayRule["port"] = rule.values.joined(separator: ",")
+            xrayRule["port"] = cleanValues.joined(separator: ",")
         }
 
         return xrayRule
