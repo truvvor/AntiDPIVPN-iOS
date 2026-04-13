@@ -172,11 +172,13 @@ struct ConfigGenerator {
         ] as [String: Any])
 
         if routeConfig.isActive {
-            // Group rules by outbound tag for efficiency
-            // Proxy rules go FIRST (higher priority — e.g., theins.ru must proxy despite *.ru being direct)
-            let proxyRules = routeConfig.rules.filter { $0.outboundTag == "proxy" }
-            let directRules = routeConfig.rules.filter { $0.outboundTag == "direct" }
-            let blockRules = routeConfig.rules.filter { $0.outboundTag == "block" }
+            // Filter out geo rules if geo data files aren't downloaded
+            let hasGeoData = GeoDataManager.shared.hasGeoData
+            let activeRules = hasGeoData ? routeConfig.rules : routeConfig.rules.filter { $0.type != .geosite && $0.type != .geoip }
+
+            let proxyRules = activeRules.filter { $0.outboundTag == "proxy" }
+            let directRules = activeRules.filter { $0.outboundTag == "direct" }
+            let blockRules = activeRules.filter { $0.outboundTag == "block" }
 
             for rule in proxyRules {
                 if let xrayRule = convertRule(rule) {
