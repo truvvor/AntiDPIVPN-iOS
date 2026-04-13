@@ -28,6 +28,7 @@
 		F2E1D0C9B8A7F6E5D4C3B2A1 /* RouteConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* RouteConfig.swift */; };
 		A3F2E1D0C9B8A7F6E5D4C3B2 /* GeoDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */; };
 		B4A3F2E1D0C9B8A7F6E5D4C3 /* StreisandRouteParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */; };
+		C5B4A3F2E1D0C9B8A7F6E5D4 /* RoutingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* RoutingSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +94,7 @@
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* RouteConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteConfig.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* GeoDataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoDataManager.swift; sourceTree = "<group>"; };
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* StreisandRouteParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreisandRouteParser.swift; sourceTree = "<group>"; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* RoutingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -208,6 +210,7 @@
 				90DC8C4A1CA527A5703E67EE /* ProfileEditView.swift */,
 				EA84112D548F283CB4719759 /* ProfilesView.swift */,
 				1D5060DC524D486F75B03C0A /* SettingsView.swift */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* RoutingSettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -329,6 +332,7 @@
 				00E50E924788BB856674FA8F /* VLESSURLParser.swift in Sources */,
 				55B770B19187D6B4A3158905 /* VPNManager.swift in Sources */,
 				CC90D65A3F878081D1E933D8 /* VPNProfile.swift in Sources */,
+				C5B4A3F2E1D0C9B8A7F6E5D4 /* RoutingSettingsView.swift in Sources */,
 				F2E1D0C9B8A7F6E5D4C3B2A1 /* RouteConfig.swift in Sources */,
 				A3F2E1D0C9B8A7F6E5D4C3B2 /* GeoDataManager.swift in Sources */,
 				B4A3F2E1D0C9B8A7F6E5D4C3 /* StreisandRouteParser.swift in Sources */,
