@@ -130,15 +130,8 @@ struct ConfigGenerator {
             "protocol": "socks",
             "settings": ["udp": true]
         ]
-        // Sniffing needed for domain-based routing (extracts SNI from TLS)
-        // routeOnly=true required for Vision flow compatibility
-        if routeConfig.isActive {
-            inboundConfig["sniffing"] = [
-                "enabled": true,
-                "destOverride": ["http", "tls"],
-                "routeOnly": true
-            ] as [String: Any]
-        }
+        // NOTE: sniffing disabled — conflicts with XTLS-Vision even with routeOnly.
+        // Domain routing works via hev-socks5-tunnel which sends domain names in SOCKS5 CONNECT.
 
         let config: [String: Any] = [
             "log": logConfig,
