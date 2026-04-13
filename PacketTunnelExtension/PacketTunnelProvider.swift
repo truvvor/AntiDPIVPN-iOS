@@ -110,7 +110,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         // List dat files for debugging
         let datFiles = (try? FileManager.default.contentsOfDirectory(atPath: datDir)) ?? []
-        fileLog("datDir: \(datDir) files: \(datFiles)")
+        fileLog("datDir files: \(datFiles)")
+        flushLog()
 
         let requestDict: [String: Any] = [
             "datDir": datDir,
@@ -120,9 +121,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         guard let jsonData = try? JSONSerialization.data(withJSONObject: requestDict),
               let base64String = jsonData.base64EncodedString() as String? else {
             fileLog("ERROR: failed to serialize xray request")
+            flushLog()
             return false
         }
 
+        fileLog("xray request base64 length: \(base64String.count)")
         let m0 = getMemoryMB()
         fileLog("MEM@pre-xray: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
         flushLog()
