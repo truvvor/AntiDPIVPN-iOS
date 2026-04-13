@@ -1,4 +1,5 @@
 import NetworkExtension
+import Network
 import os.log
 
 /// Build 36 — Clean single-mode, no memory throttling.
@@ -12,6 +13,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isRelayRunning = false
     private var readSource: DispatchSourceRead?
     private var memoryTimer: DispatchSourceTimer?
+
+    // Stall detection + auto-restart
+    private var lastTrafficTotal: UInt64 = 0
+    private var stallTicks: Int = 0
+    private var savedConfigJSON: String = ""
+
+    // Network change detection
+    private var pathMonitor: NWPathMonitor?
+    private var currentNetworkPath: String = ""
 
     // Stats
     private var packetsSent: UInt64 = 0
@@ -90,12 +100,45 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
             self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
+
+            // Stall detection: if no new packets for 60s (4 ticks × 15s), restart xray
+            let currentTotal = self.packetsSent + self.packetsRecv
+            if currentTotal > 0 && currentTotal == self.lastTrafficTotal {
+                self.stallTicks += 1
+                if self.stallTicks >= 4 {
+                    self.fileLog("STALL: no traffic for 60s — restarting xray")
+                    self.flushLog()
+                    self.restartXray()
+                    self.stallTicks = 0
+                }
+            } else {
+                self.stallTicks = 0
+                self.lastTrafficTotal = currentTotal
+            }
         }
         memoryTimer = timer
         timer.resume()
     }
 
     // MARK: - Xray
+
+    /// Restart xray in-place to recover from stalled VLESS connection.
+    private func restartXray() {
+        guard !savedConfigJSON.isEmpty else {
+            fileLog("Cannot restart: no saved config")
+            return
+        }
+        let m0 = getMemoryMB()
+        fileLog("Restarting xray — MEM: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
+        _ = LibXrayStopXray()
+        usleep(300_000)
+        if startXray(configJSON: savedConfigJSON) {
+            let m1 = getMemoryMB()
+            fileLog("Xray restarted OK — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+        } else {
+            fileLog("ERROR: xray restart FAILED")
+        }
+    }
 
     private func startXray(configJSON: String) -> Bool {
         guard let containerURL = sharedContainerURL else {
@@ -184,6 +227,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         fileLog("CONFIG: \(String(configJSON.prefix(2000)))")
         flushLog()
 
+        savedConfigJSON = configJSON
         guard startXray(configJSON: configJSON) else {
             completionHandler(NSError(domain: "PTP", code: -3, userInfo: [NSLocalizedDescriptionKey: "Xray failed to start"]))
             return
@@ -223,6 +267,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.startTun2Socks(socksPort: 3080)
             self.isTunnelRunning = true
             self.startMemoryMonitor()
+            self.startNetworkMonitor()
             let m1 = self.getMemoryMB()
             self.fileLog("MEM@ready: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
             completionHandler(nil)
@@ -369,6 +414,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler?(nil)
     }
 
+    // MARK: - Network Change Detection
+
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self, self.isTunnelRunning else { return }
+            let desc = path.usesInterfaceType(.wifi) ? "wifi" :
+                       path.usesInterfaceType(.cellular) ? "cellular" : "other"
+            let pathKey = "\(desc)-\(path.status)"
+
+            if self.currentNetworkPath.isEmpty {
+                self.currentNetworkPath = pathKey
+                self.fileLog("Network: \(desc) (\(path.status))")
+            } else if pathKey != self.currentNetworkPath {
+                self.fileLog("Network CHANGED: \(self.currentNetworkPath) → \(pathKey) — restarting xray")
+                self.currentNetworkPath = pathKey
+                self.flushLog()
+                // Brief delay to let network stabilize
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
+                    self.restartXray()
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        pathMonitor = monitor
+    }
+
     // MARK: - Sleep/Wake
 
     override func sleep(completionHandler: @escaping () -> Void) {
@@ -393,6 +465,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         isRelayRunning = false
 
         memoryTimer?.cancel(); memoryTimer = nil
+        pathMonitor?.cancel(); pathMonitor = nil
         readSource?.cancel(); readSource = nil
 
         if appSideFd >= 0 { close(appSideFd); appSideFd = -1 }
