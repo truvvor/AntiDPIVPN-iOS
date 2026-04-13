@@ -130,7 +130,9 @@ struct ConfigGenerator {
             "protocol": "socks",
             "settings": ["udp": true]
         ]
-        if routeConfig.isActive && routeConfig.rules.contains(where: { $0.type == .domain || $0.type == .geosite || $0.type == .regexp }) {
+        // Sniffing needed for domain-based routing (extracts SNI from TLS)
+        // routeOnly=true required for Vision flow compatibility
+        if routeConfig.isActive {
             inboundConfig["sniffing"] = [
                 "enabled": true,
                 "destOverride": ["http", "tls"],
@@ -168,9 +170,9 @@ struct ConfigGenerator {
         ] as [String: Any])
 
         if routeConfig.isActive {
-            // Filter out geo rules if geo data files aren't downloaded
-            let hasGeoData = GeoDataManager.shared.hasGeoData
-            let activeRules = hasGeoData ? routeConfig.rules : routeConfig.rules.filter { $0.type != .geosite && $0.type != .geoip }
+            // NEVER use geosite/geoip rules in Network Extension — loading .dat files
+            // adds ~15MB and crashes the extension. Only domain/regexp/port rules are safe.
+            let activeRules = routeConfig.rules.filter { $0.type != .geosite && $0.type != .geoip }
 
             let proxyRules = activeRules.filter { $0.outboundTag == "proxy" }
             let directRules = activeRules.filter { $0.outboundTag == "direct" }
