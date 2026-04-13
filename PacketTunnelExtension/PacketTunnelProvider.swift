@@ -104,12 +104,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let datDir = containerURL.appendingPathComponent("xray_dat").path
-        let cacheDir = containerURL.appendingPathComponent("xray_cache").path
-        let cachePath = containerURL.appendingPathComponent("xray_cache/mph.cache").path
-        try? FileManager.default.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: cachePath) {
-            FileManager.default.createFile(atPath: cachePath, contents: nil)
-        }
+        try? FileManager.default.createDirectory(atPath: datDir, withIntermediateDirectories: true)
+
+        // Delete old xray_cache directory (was incorrectly used as mphCachePath)
+        let oldCacheDir = containerURL.appendingPathComponent("xray_cache").path
+        try? FileManager.default.removeItem(atPath: oldCacheDir)
 
         // List dat files for debugging
         let datFiles = (try? FileManager.default.contentsOfDirectory(atPath: datDir)) ?? []
@@ -118,7 +117,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let requestDict: [String: Any] = [
             "datDir": datDir,
-            "mphCachePath": cachePath,
             "configJSON": configJSON
         ]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: requestDict),
