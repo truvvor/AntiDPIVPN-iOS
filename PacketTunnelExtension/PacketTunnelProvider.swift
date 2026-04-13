@@ -104,8 +104,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let datDir = containerURL.appendingPathComponent("xray_dat").path
+        let cacheDir = containerURL.appendingPathComponent("xray_cache").path
         let cachePath = containerURL.appendingPathComponent("xray_cache/mph.cache").path
-        try? FileManager.default.createDirectory(atPath: containerURL.appendingPathComponent("xray_cache").path, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: cachePath) {
+            FileManager.default.createFile(atPath: cachePath, contents: nil)
+        }
 
         // List dat files for debugging
         let datFiles = (try? FileManager.default.contentsOfDirectory(atPath: datDir)) ?? []
