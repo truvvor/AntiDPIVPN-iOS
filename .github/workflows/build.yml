@@ -25,16 +25,24 @@ jobs:
           FW="Libbox.xcframework/ios-arm64/Libbox.framework"
           if [ -d "$FW/Versions" ]; then
             echo "Converting deep bundle to shallow bundle..."
-            cp -a "$FW/Versions/A/Headers" "$FW/Headers_flat" 2>/dev/null || true
-            cp -a "$FW/Versions/A/Modules" "$FW/Modules_flat" 2>/dev/null || true
-            cp -a "$FW/Versions/A/Resources/Info.plist" "$FW/Info_flat.plist" 2>/dev/null || true
-            cp -a "$FW/Versions/A/Libbox" "$FW/Libbox_flat" 2>/dev/null || true
+            # Save files from deep structure
+            cp -R "$FW/Versions/A/Headers" "$FW/Headers_tmp"
+            cp -R "$FW/Versions/A/Modules" "$FW/Modules_tmp"
+            cp "$FW/Versions/A/Resources/Info.plist" "$FW/Info_tmp.plist"
+            if [ -f "$FW/Versions/A/Libbox" ]; then
+              cp "$FW/Versions/A/Libbox" "$FW/Libbox_tmp"
+            fi
+            # Remove deep structure and symlinks
             rm -rf "$FW/Versions" "$FW/Headers" "$FW/Modules" "$FW/Resources" "$FW/Libbox"
-            mv "$FW/Headers_flat" "$FW/Headers" 2>/dev/null || true
-            mv "$FW/Modules_flat" "$FW/Modules" 2>/dev/null || true
-            mv "$FW/Info_flat.plist" "$FW/Info.plist" 2>/dev/null || true
-            mv "$FW/Libbox_flat" "$FW/Libbox" 2>/dev/null || true
-            echo "Shallow bundle created"
+            # Restore as flat structure
+            mv "$FW/Headers_tmp" "$FW/Headers"
+            mv "$FW/Modules_tmp" "$FW/Modules"
+            mv "$FW/Info_tmp.plist" "$FW/Info.plist"
+            if [ -f "$FW/Libbox_tmp" ]; then
+              mv "$FW/Libbox_tmp" "$FW/Libbox"
+            fi
+            echo "Shallow bundle structure:"
+            ls -la "$FW/"
           fi
 
       - name: Generate Xcode project
