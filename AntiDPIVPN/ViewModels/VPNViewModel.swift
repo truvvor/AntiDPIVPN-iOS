@@ -309,14 +309,25 @@ class VPNViewModel: ObservableObject {
             debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
         }
 
+        // Expand geosite rules in main app (no memory limit here)
+        var expandedRoute = globalRoute
+        if globalRoute.isActive {
+            addLog("Expanding geosite rules...")
+            expandedRoute = GeositeExpander.shared.expandRouteConfig(globalRoute)
+            let ruleCount = expandedRoute.rules.count
+            let domainCount = expandedRoute.rules.reduce(0) { $0 + $1.values.count }
+            addLog("Expanded: \(ruleCount) rules, \(domainCount) total values")
+        }
+
         guard let config = ConfigGenerator.generateXrayConfig(
-            from: currentProfile, routeConfig: globalRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
+            from: currentProfile, routeConfig: expandedRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
         ) else {
             addLog("Failed to generate Xray config")
             return
         }
 
-        let routeInfo = globalRoute.isEmpty ? "no routing" : "\(globalRoute.rules.count) rules"
+        addLog("Config size: \(config.count) bytes")
+        let routeInfo = expandedRoute.isActive ? "\(expandedRoute.rules.count) rules" : "no routing"
         let dnsInfo = currentProfile.dnsServers.isEmpty ? "default DNS" : currentProfile.effectiveDNS.joined(separator: ", ")
         let bwStr = bandwidth > 0 ? "\(bandwidth) KB/s" : "unlimited"
         addLog("Connecting [\(routeInfo), \(dnsInfo), bw=\(bwStr)]...")

@@ -108,6 +108,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         try? FileManager.default.createDirectory(atPath: datDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(atPath: cachePath, withIntermediateDirectories: true)
 
+        // List dat files for debugging
+        let datFiles = (try? FileManager.default.contentsOfDirectory(atPath: datDir)) ?? []
+        fileLog("datDir: \(datDir) files: \(datFiles)")
+
         let requestDict: [String: Any] = [
             "datDir": datDir,
             "mphCachePath": cachePath,
@@ -115,27 +119,38 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         ]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: requestDict),
               let base64String = jsonData.base64EncodedString() as String? else {
-            fileLog("ERROR: failed to serialize xray config")
+            fileLog("ERROR: failed to serialize xray request")
             return false
         }
 
         let m0 = getMemoryMB()
         fileLog("MEM@pre-xray: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
+        flushLog()
+
+        fileLog("Calling LibXrayRunXrayFromJSON...")
+        flushLog()
 
         let responseBase64 = LibXrayRunXrayFromJSON(base64String)
+
+        let m1 = getMemoryMB()
+        fileLog("LibXray returned — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
+        fileLog("Response length: \(responseBase64.count)")
+
         if let responseData = Data(base64Encoded: responseBase64),
            let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
             let success = response["success"] as? Bool ?? false
+            let errMsg = response["error"] as? String ?? ""
+            fileLog("xray response: success=\(success) error='\(errMsg)'")
+            flushLog()
             if success {
-                let m1 = getMemoryMB()
-                fileLog("xray started OK — MEM: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
                 return true
             } else {
-                fileLog("xray FAILED: \(response["error"] as? String ?? "unknown")")
                 return false
             }
         }
-        fileLog("ERROR: failed to parse xray response")
+        fileLog("ERROR: failed to decode xray response base64")
+        fileLog("Raw response: \(String(responseBase64.prefix(200)))")
+        flushLog()
         return false
     }
 
