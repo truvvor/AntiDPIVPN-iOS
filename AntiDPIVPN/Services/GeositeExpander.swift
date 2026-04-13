@@ -40,8 +40,15 @@ class GeositeExpander {
                     }
                 }
                 if !allDomains.isEmpty {
-                    // Limit to top 50 per category to keep config small for extension
-                    let limited = Array(allDomains.prefix(50))
+                    // Sort: RootDomain entries (no prefix) first, then full:, then regexp:
+                    // RootDomain = primary domains like youtube.com (most useful)
+                    let sorted = allDomains.sorted { a, b in
+                        let aScore = a.hasPrefix("full:") ? 1 : a.hasPrefix("regexp:") ? 2 : 0
+                        let bScore = b.hasPrefix("full:") ? 1 : b.hasPrefix("regexp:") ? 2 : 0
+                        return aScore < bScore
+                    }
+                    // Limit to 10 per category — minimal memory for domain matcher
+                    let limited = Array(sorted.prefix(10))
                     newRules.append(RouteRule(type: .domain, values: limited, outboundTag: rule.outboundTag))
                 }
             } else {
