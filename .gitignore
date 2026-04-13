@@ -8,14 +8,11 @@ DerivedData/
 
 # CocoaPods
 Pods/
-
 # Carthage
 Carthage/Build/
-
 # Swift Package Manager
 .build/
 .swiftpm/
-
 # Private keys and certificates
 *.p8
 *.p12
@@ -23,22 +20,18 @@ Carthage/Build/
 *.mobileprovision
 *.provisionprofile
 private_keys/
-
 # OS files
 .DS_Store
 *.swp
 *~
-
 # Export options
 ExportOptions.plist
-
 # Logs
 *.log
-
 # LibXray backups
 LibXray.xcframework.bak.v14/
 LibXray.xcframework.bak.v20/
-
 # Simulator binaries (too large for GitHub)
 LibXray.xcframework/ios-arm64_x86_64-simulator/
 HevSocks5Tunnel.xcframework/ios-arm64_x86_64-simulator/
+AntiDPIVPNUITests/
