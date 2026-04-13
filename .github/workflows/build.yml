@@ -21,6 +21,22 @@ jobs:
             unzip -qo Libbox.xcframework.zip
           fi
 
+          # Convert macOS deep bundle to iOS shallow bundle for ios-arm64
+          FW="Libbox.xcframework/ios-arm64/Libbox.framework"
+          if [ -d "$FW/Versions" ]; then
+            echo "Converting deep bundle to shallow bundle..."
+            cp -a "$FW/Versions/A/Headers" "$FW/Headers_flat" 2>/dev/null || true
+            cp -a "$FW/Versions/A/Modules" "$FW/Modules_flat" 2>/dev/null || true
+            cp -a "$FW/Versions/A/Resources/Info.plist" "$FW/Info_flat.plist" 2>/dev/null || true
+            cp -a "$FW/Versions/A/Libbox" "$FW/Libbox_flat" 2>/dev/null || true
+            rm -rf "$FW/Versions" "$FW/Headers" "$FW/Modules" "$FW/Resources" "$FW/Libbox"
+            mv "$FW/Headers_flat" "$FW/Headers" 2>/dev/null || true
+            mv "$FW/Modules_flat" "$FW/Modules" 2>/dev/null || true
+            mv "$FW/Info_flat.plist" "$FW/Info.plist" 2>/dev/null || true
+            mv "$FW/Libbox_flat" "$FW/Libbox" 2>/dev/null || true
+            echo "Shallow bundle created"
+          fi
+
       - name: Generate Xcode project
         run: |
           which xcodegen || brew install xcodegen
