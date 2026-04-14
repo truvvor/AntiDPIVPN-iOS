@@ -54,9 +54,26 @@ jobs:
             --apiKey 4RA5988Z6S \
             --apiIssuer e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc
 
+          # Stage dSYMs + app binary for artifact upload BEFORE cleanup
+          mkdir -p "$RUNNER_TEMP/debug_symbols"
+          cp -R "$RUNNER_TEMP/AntiDPIVPN.xcarchive/dSYMs" "$RUNNER_TEMP/debug_symbols/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/AntiDPIVPN.xcarchive/Products/Applications/AntiDPIVPN.app/AntiDPIVPN" \
+             "$RUNNER_TEMP/debug_symbols/AntiDPIVPN.bin" 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/debug_symbols/"
+
+      - name: Upload dSYMs + binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsyms-and-binary
+          path: ${{ runner.temp }}/debug_symbols
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Cleanup
         if: always()
         run: |
           rm -rf ${{ runner.temp }}/AntiDPIVPN.xcarchive
           rm -rf ${{ runner.temp }}/export
           rm -f ${{ runner.temp }}/ExportOptions.plist
+
