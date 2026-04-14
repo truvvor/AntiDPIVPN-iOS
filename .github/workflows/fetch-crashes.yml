@@ -1,0 +1,81 @@
+name: Fetch crash logs from Mac mini
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - name: Collect crash-related files
+        run: |
+          set +e
+          OUT="$RUNNER_TEMP/crashes"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+
+          echo "=== User home ==="
+          echo "$HOME"
+          id
+
+          echo "=== MobileDevice crash logs (devices synced via Xcode) ==="
+          ls -la "$HOME/Library/Logs/CrashReporter/MobileDevice/" 2>/dev/null | head -30
+          mkdir -p "$OUT/MobileDevice"
+          if [ -d "$HOME/Library/Logs/CrashReporter/MobileDevice" ]; then
+            find "$HOME/Library/Logs/CrashReporter/MobileDevice" -type f \( -name "*AntiDPIVPN*" -o -name "*.ips" -o -name "*.crash" \) -mtime -3 -print 2>/dev/null | while read f; do
+              cp "$f" "$OUT/MobileDevice/" 2>/dev/null
+            done
+            ls -la "$OUT/MobileDevice/" | head -40
+          fi
+
+          echo "=== Local DiagnosticReports (simulator + mac) ==="
+          mkdir -p "$OUT/DiagnosticReports"
+          find "$HOME/Library/Logs/DiagnosticReports" -type f -mtime -3 \( -name "*AntiDPI*" -o -name "*.ips" \) -print 2>/dev/null | head -10 | while read f; do
+            cp "$f" "$OUT/DiagnosticReports/" 2>/dev/null
+          done
+
+          echo "=== Xcode Organizer crash caches (TestFlight downloads) ==="
+          mkdir -p "$OUT/Organizer"
+          for p in \
+            "$HOME/Library/Developer/Xcode/Products" \
+            "$HOME/Library/Group Containers/group.com.apple.dt.Xcode/Xcode/OrganizerCrashes" \
+            "$HOME/Library/Developer/Xcode/Archives"
+          do
+            echo "--- $p ---"
+            if [ -d "$p" ]; then
+              find "$p" -type f \( -name "*.ips" -o -name "*.crash" -o -name "*.xccrashpoint" \) -mtime -7 2>/dev/null | head -20
+            fi
+          done
+
+          # Xcode 15+ keeps Organizer crashes here:
+          for base in \
+            "$HOME/Library/Developer/Xcode/DerivedData" \
+            "$HOME/Library/Group Containers/group.com.apple.dt.Xcode"
+          do
+            echo "--- scan $base ---"
+            find "$base" -type f -name "*.ips" -mtime -3 2>/dev/null | head -20
+          done
+
+          # Copy any .ips under the Xcode Group Container
+          find "$HOME/Library/Group Containers/group.com.apple.dt.Xcode" -type f \( -name "*.ips" -o -name "*.crash" \) -mtime -3 -print 2>/dev/null | while read f; do
+            fname=$(echo "$f" | tr '/' '_')
+            cp "$f" "$OUT/Organizer/$fname" 2>/dev/null
+          done
+          ls -la "$OUT/Organizer/" 2>/dev/null | head -40
+
+          echo "=== AntiDPIVPN archives ==="
+          find "$HOME/Library/Developer/Xcode/Archives" -maxdepth 4 -name "AntiDPIVPN*.xcarchive" -mtime -3 2>/dev/null | head -5
+
+          echo "=== Summary ==="
+          find "$OUT" -type f | head -40
+          echo "Total files:"
+          find "$OUT" -type f | wc -l
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-logs
+          path: ${{ runner.temp }}/crashes
+          if-no-files-found: warn
+          retention-days: 3
