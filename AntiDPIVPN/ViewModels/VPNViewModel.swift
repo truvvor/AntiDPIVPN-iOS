@@ -13,6 +13,7 @@ class VPNViewModel: ObservableObject {
     @Published var adaptiveLevel: Int = 3
     @Published var adaptiveStatus: String = ""
     @Published var globalRoute: RouteConfig = RouteConfig()
+    @Published var socksPort: Int = 3080
 
     private var sharedContainerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.truvvor.secureconnect")
