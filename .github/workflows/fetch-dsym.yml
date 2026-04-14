@@ -7,31 +7,74 @@ on:
         description: 'comma-separated decimal offsets in main binary'
         required: false
         default: '908932,904396,904484,909128,908292,908440'
+      binary_uuid:
+        description: 'optional: main-binary UUID from crash report (slice_uuid). If empty → latest archive.'
+        required: false
+        default: ''
 
 jobs:
   fetch:
     runs-on: self-hosted
     timeout-minutes: 10
     steps:
-      - name: Find latest archive
+      - name: Find archive (by UUID or latest)
         id: find
         run: |
           ARCH_DIR="$HOME/Library/Developer/Xcode/Archives"
-          LATEST=$(find "$ARCH_DIR" -maxdepth 3 -name "AntiDPIVPN*.xcarchive" -type d 2>/dev/null | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
-          echo "archive=$LATEST"
-          echo "archive=$LATEST" >> $GITHUB_OUTPUT
-          ls -la "$LATEST/" 2>/dev/null || echo "not found"
-          ls -la "$LATEST/dSYMs/" 2>/dev/null
+          UUID_INPUT="${{ github.event.inputs.binary_uuid }}"
+          # Normalize: Apple-style UUIDs are uppercase, hyphenated; dwarfdump outputs upper.
+          UUID_NORM=$(echo "$UUID_INPUT" | tr '[:lower:]' '[:upper:]' | tr -d ' ')
+
+          echo "Looking under: $ARCH_DIR"
+          echo "Target UUID (optional): '$UUID_NORM'"
+
+          pick_by_uuid() {
+            local target="$1"
+            # Walk every archive, read its main-binary UUID with dwarfdump,
+            # pick the one that matches. Stop on first hit.
+            while IFS= read -r arch; do
+              bin="$arch/Products/Applications/AntiDPIVPN.app/AntiDPIVPN"
+              [ -f "$bin" ] || continue
+              # dwarfdump --uuid prints: "UUID: XXXX (arm64) /path"
+              u=$(dwarfdump --uuid "$bin" 2>/dev/null | awk '{print $2}' | head -1)
+              echo "  $arch -> $u" >&2
+              if [ "$u" = "$target" ]; then
+                printf '%s' "$arch"
+                return 0
+              fi
+            done < <(find "$ARCH_DIR" -maxdepth 3 -name "AntiDPIVPN*.xcarchive" -type d 2>/dev/null \
+                     | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | awk '{print $2}')
+            return 1
+          }
+
+          if [ -n "$UUID_NORM" ]; then
+            ARCH=$(pick_by_uuid "$UUID_NORM" || true)
+            if [ -z "$ARCH" ]; then
+              echo "::warning::UUID $UUID_NORM not found in archives — falling back to latest"
+            fi
+          fi
+          if [ -z "$ARCH" ]; then
+            ARCH=$(find "$ARCH_DIR" -maxdepth 3 -name "AntiDPIVPN*.xcarchive" -type d 2>/dev/null \
+                   | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
+          fi
+          echo "archive=$ARCH"
+          echo "archive=$ARCH" >> $GITHUB_OUTPUT
+          [ -d "$ARCH" ] && ls -la "$ARCH/" "$ARCH/dSYMs/" 2>/dev/null || echo "not found"
 
       - name: Symbolicate offsets with atos
         run: |
           ARCH="${{ steps.find.outputs.archive }}"
-          if [ -z "$ARCH" ]; then echo "::error::No archive"; exit 1; fi
+          if [ -z "$ARCH" ] || [ ! -d "$ARCH" ]; then
+            echo "::error::No archive resolved"; exit 1
+          fi
           BIN="$ARCH/Products/Applications/AntiDPIVPN.app/AntiDPIVPN"
           DSYM="$ARCH/dSYMs/AntiDPIVPN.app.dSYM/Contents/Resources/DWARF/AntiDPIVPN"
           echo "bin=$BIN"
           echo "dsym=$DSYM"
           ls -la "$BIN" "$DSYM" 2>/dev/null
+
+          echo "binary uuid: $(dwarfdump --uuid "$BIN" 2>/dev/null | awk '{print $2}' | head -1)"
+          echo "dsym uuid:   $(dwarfdump --uuid "$DSYM" 2>/dev/null | awk '{print $2}' | head -1)"
 
           # Get __TEXT vmaddr (load address of text section)
           LOAD=$(otool -l "$BIN" | awk '/segname __TEXT/{found=1} found && /vmaddr/{print $2; exit}')
@@ -48,7 +91,6 @@ jobs:
         run: |
           ARCH="${{ steps.find.outputs.archive }}"
           cp -R "$ARCH/dSYMs" "$RUNNER_TEMP/dSYMs"
-          # also copy the main binary for offline analysis
           mkdir -p "$RUNNER_TEMP/binary"
           cp "$ARCH/Products/Applications/AntiDPIVPN.app/AntiDPIVPN" "$RUNNER_TEMP/binary/" 2>/dev/null || true
 
