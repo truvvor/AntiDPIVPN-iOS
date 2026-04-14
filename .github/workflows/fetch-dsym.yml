@@ -1,0 +1,60 @@
+name: Fetch dSYM + symbolicate crash offsets
+
+on:
+  workflow_dispatch:
+    inputs:
+      offsets:
+        description: 'comma-separated decimal offsets in main binary'
+        required: false
+        default: '908932,904396,904484,909128,908292,908440'
+
+jobs:
+  fetch:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - name: Find latest archive
+        id: find
+        run: |
+          ARCH_DIR="$HOME/Library/Developer/Xcode/Archives"
+          LATEST=$(find "$ARCH_DIR" -maxdepth 3 -name "AntiDPIVPN*.xcarchive" -type d 2>/dev/null | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
+          echo "archive=$LATEST"
+          echo "archive=$LATEST" >> $GITHUB_OUTPUT
+          ls -la "$LATEST/" 2>/dev/null || echo "not found"
+          ls -la "$LATEST/dSYMs/" 2>/dev/null
+
+      - name: Symbolicate offsets with atos
+        run: |
+          ARCH="${{ steps.find.outputs.archive }}"
+          if [ -z "$ARCH" ]; then echo "::error::No archive"; exit 1; fi
+          BIN="$ARCH/Products/Applications/AntiDPIVPN.app/AntiDPIVPN"
+          DSYM="$ARCH/dSYMs/AntiDPIVPN.app.dSYM/Contents/Resources/DWARF/AntiDPIVPN"
+          echo "bin=$BIN"
+          echo "dsym=$DSYM"
+          ls -la "$BIN" "$DSYM" 2>/dev/null
+
+          # Get __TEXT vmaddr (load address of text section)
+          LOAD=$(otool -l "$BIN" | awk '/segname __TEXT/{found=1} found && /vmaddr/{print $2; exit}')
+          echo "text_vmaddr=$LOAD"
+
+          IFS=',' read -ra OFF <<< "${{ github.event.inputs.offsets }}"
+          for o in "${OFF[@]}"; do
+            ADDR=$(printf '0x%x\n' $((LOAD + o)))
+            echo "--- offset $o -> $ADDR ---"
+            atos -o "$DSYM" -l "$LOAD" "$ADDR" 2>&1
+          done
+
+      - name: Package dSYM
+        run: |
+          ARCH="${{ steps.find.outputs.archive }}"
+          cp -R "$ARCH/dSYMs" "$RUNNER_TEMP/dSYMs"
+          # also copy the main binary for offline analysis
+          mkdir -p "$RUNNER_TEMP/binary"
+          cp "$ARCH/Products/Applications/AntiDPIVPN.app/AntiDPIVPN" "$RUNNER_TEMP/binary/" 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsym-and-binary
+          path: ${{ runner.temp }}/dSYMs
+          retention-days: 3
