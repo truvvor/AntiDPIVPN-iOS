@@ -346,12 +346,26 @@ class VPNViewModel: ObservableObject {
     }
 
     private func updateVersion() {
-        DispatchQueue.global(qos: .background).async {
-            let responseBase64 = LibXrayXrayVersion()
-            if let responseData = Data(base64Encoded: responseBase64),
-               let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-               let data = response["data"] as? String {
-                DispatchQueue.main.async { self.xrayVersion = data }
+        // Main app does NOT link LibXray (it triggers FIPS-140-3 SIGABRT at launch).
+        // Read cached version from App Group UserDefaults, refresh via IPC if tunnel is running.
+        let suite = UserDefaults(suiteName: "group.com.truvvor.secureconnect")
+        if let cached = suite?.string(forKey: "xray_version"), !cached.isEmpty {
+            DispatchQueue.main.async { self.xrayVersion = cached }
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self,
+                  let session = self.vpnManager.tunnelProviderSession,
+                  let payload = "getXrayVersion".data(using: .utf8) else { return }
+            do {
+                try session.sendProviderMessage(payload) { data in
+                    guard let data = data,
+                          let v = String(data: data, encoding: .utf8),
+                          !v.isEmpty else { return }
+                    DispatchQueue.main.async { self.xrayVersion = v }
+                    suite?.set(v, forKey: "xray_version")
+                }
+            } catch {
+                // Extension not running — rely on cached value
             }
         }
     }

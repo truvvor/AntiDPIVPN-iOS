@@ -392,7 +392,28 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // MARK: - App Messages
 
+    // MARK: - Xray version publishing for main app
+
+    private func xrayVersionString() -> String {
+        guard let responseBase64 = LibXrayXrayVersion() as String?,
+              let responseData = Data(base64Encoded: responseBase64),
+              let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+              let data = response["data"] as? String else { return "" }
+        return data
+    }
+
+    private func publishXrayVersion() {
+        let v = xrayVersionString()
+        guard !v.isEmpty,
+              let defaults = UserDefaults(suiteName: "group.com.truvvor.secureconnect") else { return }
+        defaults.set(v, forKey: "xray_version")
+    }
+
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
+        if let command = String(data: messageData, encoding: .utf8), command == "getXrayVersion" {
+            completionHandler?(xrayVersionString().data(using: .utf8))
+            return
+        }
         if let command = String(data: messageData, encoding: .utf8), command == "getLogs" {
             flushLog()
             var allLogs = ""
