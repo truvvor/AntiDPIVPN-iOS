@@ -13,6 +13,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Guard — no hardcoded build-NN literal in Swift
+        run: |
+          set -e
+          # Matches `"build 89"`, `(build 123)` etc. Must be read from
+          # CFBundleVersion at runtime instead (see PacketTunnelProvider.swift
+          # buildNumber). Hardcoded literals have bitten us multiple times.
+          BAD=$(grep -REn '"[Bb]uild [0-9]+' --include='*.swift' . || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::Hardcoded build-NN literal found in Swift. Use dynamic CFBundleVersion lookup instead."
+            echo "$BAD"
+            exit 1
+          fi
+          echo "OK — no hardcoded build literals"
+
       - name: Build and Upload
         env:
           RUNNER_TEMP: ${{ runner.temp }}

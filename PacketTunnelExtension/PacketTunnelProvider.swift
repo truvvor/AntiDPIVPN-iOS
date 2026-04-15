@@ -2,11 +2,22 @@ import NetworkExtension
 import Network
 import os.log
 
-/// Build 89 — Sync fileLog + 2s heartbeat + phys_footprint + mem pressure source + GOMEMLIMIT.
+/// PacketTunnelProvider — sync fileLog + 2s heartbeat + phys_footprint + mem pressure source + GOMEMLIMIT.
+/// Build number is read dynamically from CFBundleVersion; see buildNumber below.
 /// Trust iOS to manage memory. If extension is killed by jetsam,
 /// iOS auto-reconnects the VPN (disconnectOnSleep=false).
 /// connIdle=30s policy handles stale connection cleanup.
 class PacketTunnelProvider: NEPacketTunnelProvider {
+    /// Single source of truth for the current build number in runtime logs.
+    /// Reads CFBundleVersion from the extension's own Info.plist at runtime,
+    /// so any `fileLog("... (build \(buildNumber)) ...")` call always prints
+    /// the real shipping build — no more drift between hardcoded literal and
+    /// CFBundleVersion. Both `Bundle(for: Self.self)` (extension bundle) and
+    /// `Bundle.main` (also the extension bundle in a NE target) work; we use
+    /// the former to be explicit.
+    private static let buildNumber: String =
+        (Bundle(for: PacketTunnelProvider.self).infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1
     private var tunSideFd: Int32 = -1
@@ -250,7 +261,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         setenv("GOGC", "50", 1)
         let m0 = getMemoryMB()
         let pf0 = getPhysFootprintMB()
-        fileLog("Starting tunnel (build 89) — GOMEMLIMIT=45MiB GOGC=50")
+        fileLog("Starting tunnel (build \(Self.buildNumber)) — GOMEMLIMIT=45MiB GOGC=50")
         fileLog("MEM@start: phys=\(String(format: "%.1f", pf0))MB rss=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
