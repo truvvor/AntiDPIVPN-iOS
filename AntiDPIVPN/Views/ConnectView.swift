@@ -38,8 +38,6 @@ struct ConnectView: View {
 
                     // Connection Status
                     VStack(spacing: 20) {
-                        Text("lmp")
-
                         Button(action: {
                             if isConnected {
                                 viewModel.disconnectVPN()
