@@ -2,7 +2,7 @@ import NetworkExtension
 import Network
 import os.log
 
-/// Build 36 — Clean single-mode, no memory throttling.
+/// Build 89 — Sync fileLog + 2s heartbeat + phys_footprint + mem pressure source + GOMEMLIMIT.
 /// Trust iOS to manage memory. If extension is killed by jetsam,
 /// iOS auto-reconnects the VPN (disconnectOnSleep=false).
 /// connIdle=30s policy handles stale connection cleanup.
@@ -13,6 +13,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isRelayRunning = false
     private var readSource: DispatchSourceRead?
     private var memoryTimer: DispatchSourceTimer?
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     // Stall detection + auto-restart
     private var lastTrafficTotal: UInt64 = 0
@@ -38,7 +39,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // Logging
     private var logFileHandle: FileHandle?
-    private var logBuffer = Data()
     private var logTimer: DispatchSourceTimer?
 
     private var sharedContainerURL: URL? {
@@ -54,28 +54,40 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let logURL = logsDir.appendingPathComponent("tunnel.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         logFileHandle = FileHandle(forWritingAtPath: logURL.path)
+        // No flush timer — fileLog writes synchronously with fsync on every call.
+    }
 
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timer.schedule(deadline: .now() + 5, repeating: 5)
-        timer.setEventHandler { [weak self] in self?.flushLog() }
-        logTimer = timer
-        timer.resume()
+    private func startMemoryPressureMonitor() {
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: DispatchQueue.global(qos: .utility))
+        src.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let mask = src.mask
+            let label = mask.contains(.critical) ? "CRITICAL"
+                      : mask.contains(.warning)  ? "warning"
+                      : "normal"
+            let pf = self.getPhysFootprintMB()
+            let avail = Double(os_proc_available_memory()) / 1048576.0
+            self.fileLog("MEMPRESSURE=\(label) phys_footprint=\(String(format: "%.1f", pf))MB avail=\(String(format: "%.1f", avail))MB")
+        }
+        src.resume()
+        memoryPressureSource = src
     }
 
     private func fileLog(_ message: String) {
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         if let data = "[\(ts)] \(message)\n".data(using: .utf8) {
-            logBuffer.append(data)
-            if logBuffer.count > 4096 { flushLog() }
+            // Synchronous write + fsync — survives SIGKILL (jetsam), nothing lost mid-stream.
+            logFileHandle?.write(data)
+            logFileHandle?.synchronizeFile()
         }
         os_log(.info, "PTP: %{public}@", message)
     }
 
+    // Kept for API compatibility with existing call sites; writes are already synchronous.
     private func flushLog() {
-        guard !logBuffer.isEmpty else { return }
-        logFileHandle?.write(logBuffer)
         logFileHandle?.synchronizeFile()
-        logBuffer.removeAll(keepingCapacity: true)
     }
 
     // MARK: - Memory (diagnostic only, no throttling)
@@ -93,21 +105,40 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return (used, avail)
     }
 
+    /// phys_footprint is the metric iOS jetsam actually uses to decide which
+    /// process to kill under memory pressure. resident_size underestimates it
+    /// because it excludes compressed pages, IOKit mappings, and dirty anon
+    /// memory in Go's heap arena (__noptrbss). When this value approaches the
+    /// extension's memlimit (~50 MB on PacketTunnelProvider) — we are dying.
+    private func getPhysFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size) / 4
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return -1.0 }
+        return Double(info.phys_footprint) / 1048576.0
+    }
+
     private func startMemoryMonitor() {
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timer.schedule(deadline: .now() + 5, repeating: 15)
+        // 2s heartbeat: if log ends on HB line we know death time ±2s; if on
+        // non-HB line — process died inside that handler.
+        timer.schedule(deadline: .now() + 2, repeating: 2)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
-            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
+            let pf = self.getPhysFootprintMB()
+            self.fileLog("HB phys=\(String(format: "%.1f", pf))MB rss=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
 
-            // Stall detection: if no new packets for 60s (4 ticks × 15s), restart xray
+            // Stall detection: if no new packets for 60s (30 ticks × 2s), restart xray
             let currentTotal = self.packetsSent + self.packetsRecv
             if currentTotal > 0 && currentTotal == self.lastTrafficTotal {
                 self.stallTicks += 1
-                if self.stallTicks >= 4 {
+                if self.stallTicks >= 30 {
                     self.fileLog("STALL: no traffic for 60s — restarting xray")
-                    self.flushLog()
                     self.restartXray()
                     self.stallTicks = 0
                 }
@@ -209,9 +240,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
+        startMemoryPressureMonitor()
+        // Cap Go heap + force more aggressive GC — Go 1.26 runtime respects these
+        // env vars (GOMEMLIMIT: soft heap cap; GOGC: pacer target %).
+        // Must be set BEFORE first LibXray call — once the Go runtime starts,
+        // changes are ignored. 45MiB keeps us below the ~50MB jetsam limit with
+        // some headroom for Swift side (hev, NE buffers, stack).
+        setenv("GOMEMLIMIT", "45MiB", 1)
+        setenv("GOGC", "50", 1)
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 88) — routing, DNS, keepalive")
-        fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
+        let pf0 = getPhysFootprintMB()
+        fileLog("Starting tunnel (build 89) — GOMEMLIMIT=45MiB GOGC=50")
+        fileLog("MEM@start: phys=\(String(format: "%.1f", pf0))MB rss=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
               let providerConfig = protocolConfig.providerConfiguration,
@@ -479,13 +519,21 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         let m = getMemoryMB()
-        fileLog("STOP reason=\(reason.rawValue) used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
+        let pf = getPhysFootprintMB()
+        // Reason codes (NEProviderStopReason): 0=none, 1=userInitiated, 2=providerFailed,
+        // 3=noNetworkAvailable, 4=unrecoverableNetworkChange, 5=providerDisabled,
+        // 6=authenticationCanceled, 7=configurationFailed, 8=idleTimeout,
+        // 9=configurationDisabled, 10=configurationRemoved, 11=superceded,
+        // 12=userLogout, 13=userSwitch, 14=connectionFailed, 15=sleep,
+        // 16=appUpdate.
+        fileLog("STOP reason=\(reason.rawValue) phys=\(String(format: "%.1f", pf))MB rss=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB")
         fileLog("stats: sent=\(packetsSent) recv=\(packetsRecv) dropped=\(packetsDropped)")
 
         isTunnelRunning = false
         isRelayRunning = false
 
         memoryTimer?.cancel(); memoryTimer = nil
+        memoryPressureSource?.cancel(); memoryPressureSource = nil
         pathMonitor?.cancel(); pathMonitor = nil
         readSource?.cancel(); readSource = nil
 
