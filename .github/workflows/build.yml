@@ -27,6 +27,15 @@ jobs:
           echo "=== Signing identities ==="
           security find-identity -v -p codesigning
 
+          # Regenerate project.pbxproj from project.yml so new source files
+          # dropped into the source group directories are picked up on every
+          # build (XcodeGen source group: type=group).
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            echo "xcodegen not found on runner; install via 'brew install xcodegen'"
+            exit 1
+          fi
+          xcodegen generate --spec project.yml
+
           # Archive
           xcodebuild -scheme AntiDPIVPN \
             -sdk iphoneos \
