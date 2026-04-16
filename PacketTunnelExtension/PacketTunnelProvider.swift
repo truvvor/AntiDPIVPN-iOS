@@ -2,10 +2,10 @@ import NetworkExtension
 import Network
 import os.log
 
-/// Build 36 — Clean single-mode, no memory throttling.
-/// Trust iOS to manage memory. If extension is killed by jetsam,
-/// iOS auto-reconnects the VPN (disconnectOnSleep=false).
-/// connIdle=30s policy handles stale connection cleanup.
+/// Build 39 — Zero-allocation relay hot path.
+/// RX: pool of 128 persistent 2KB buffers, handed to NE via Data(bytesNoCopy:).
+/// TX: one preallocated iovec[2], reused per writev. Eliminates per-packet
+/// Swift heap churn during connection bursts (Telegram 80+ conn/s).
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1
@@ -28,9 +28,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var packetsRecv: UInt64 = 0
     private var packetsDropped: UInt64 = 0
 
-    // Pre-allocated read buffer (reused across events)
+    // RX pool: 128 × 2KB buffers, handed to NE via Data(bytesNoCopy:).
+    // writePackets copies synchronously into NE's own address space before
+    // returning, so a slot is reusable once the batch call completes.
+    // Ring-index rotates; pool size >> realistic writePackets latency.
     private let readBufSize = 2048
-    private var readBuf: UnsafeMutablePointer<UInt8>?
+    private let rxPoolSize = 128
+    private var rxPool: [UnsafeMutablePointer<UInt8>] = []
+    private var rxPoolIndex = 0
+
+    // Preallocated iovec pair for TX writev. Reused per packet to avoid
+    // allocating a fresh [iovec] (Swift heap + ARC) on every outbound packet.
+    private var txIov: UnsafeMutablePointer<iovec>?
 
     // Pre-built AF headers
     private static let afInet4Header = Data([0, 0, 0, 2])
@@ -210,7 +219,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 38) — routing, DNS, keepalive")
+        fileLog("Starting tunnel (build 39) — zero-alloc relay, rxPool=\(rxPoolSize)×\(readBufSize)B")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -295,7 +304,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         _ = fcntl(appSideFd, F_SETFL, flags | O_NONBLOCK)
         fileLog("socketpair tunFd=\(tunSideFd) appFd=\(appSideFd) buf=128KB")
 
-        readBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: readBufSize)
+        rxPool = (0..<rxPoolSize).map { _ in UnsafeMutablePointer<UInt8>.allocate(capacity: readBufSize) }
+        rxPoolIndex = 0
+        txIov = UnsafeMutablePointer<iovec>.allocate(capacity: 2)
 
         isRelayRunning = true
         startReadingFromPacketFlow()
@@ -331,6 +342,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self = self, self.isRelayRunning else { return }
 
+            guard let iov = self.txIov else { return }
             for (i, packet) in packets.enumerated() {
                 let protoNum = protocols[i] as! Int32
                 let afHeader = (protoNum == AF_INET6) ? Self.afInet6Header : Self.afInet4Header
@@ -339,11 +351,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     guard let packetBase = packetPtr.baseAddress else { return -1 }
                     return afHeader.withUnsafeBytes { headerPtr -> Int in
                         guard let headerBase = headerPtr.baseAddress else { return -1 }
-                        var iov = [
-                            iovec(iov_base: UnsafeMutableRawPointer(mutating: headerBase), iov_len: 4),
-                            iovec(iov_base: UnsafeMutableRawPointer(mutating: packetBase), iov_len: packet.count)
-                        ]
-                        return writev(self.appSideFd, &iov, 2)
+                        iov[0] = iovec(iov_base: UnsafeMutableRawPointer(mutating: headerBase), iov_len: 4)
+                        iov[1] = iovec(iov_base: UnsafeMutableRawPointer(mutating: packetBase), iov_len: packet.count)
+                        return writev(self.appSideFd, iov, 2)
                     }
                 }
                 if written == totalLen { self.packetsSent += 1 }
@@ -357,18 +367,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func startReadingFromTun2Socks() {
         let source = DispatchSource.makeReadSource(fileDescriptor: appSideFd, queue: DispatchQueue.global(qos: .userInitiated))
         source.setEventHandler { [weak self] in
-            guard let self = self, self.isRelayRunning, let buf = self.readBuf else { return }
+            guard let self = self, self.isRelayRunning, !self.rxPool.isEmpty else { return }
 
             var batchPackets: [Data] = []
             var batchProtos: [NSNumber] = []
+            batchPackets.reserveCapacity(32)
+            batchProtos.reserveCapacity(32)
 
             while true {
-                let n = read(self.appSideFd, buf, self.readBufSize)
+                let slot = self.rxPool[self.rxPoolIndex]
+                let n = read(self.appSideFd, slot, self.readBufSize)
                 if n <= 4 { break }
+                self.rxPoolIndex = (self.rxPoolIndex &+ 1) % self.rxPoolSize
 
-                let af = UInt32(buf[0]) << 24 | UInt32(buf[1]) << 16 | UInt32(buf[2]) << 8 | UInt32(buf[3])
+                let af = UInt32(slot[0]) << 24 | UInt32(slot[1]) << 16 | UInt32(slot[2]) << 8 | UInt32(slot[3])
                 let proto: NSNumber = (af == 30) ? NSNumber(value: AF_INET6) : NSNumber(value: AF_INET)
-                batchPackets.append(Data(bytes: buf + 4, count: n - 4))
+                // Zero-copy handoff: NE copies into its own address space synchronously,
+                // so the slot is reusable once writePackets returns.
+                batchPackets.append(Data(bytesNoCopy: slot + 4, count: n - 4, deallocator: .none))
                 batchProtos.append(proto)
 
                 if batchPackets.count >= 32 {
@@ -470,7 +486,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         if appSideFd >= 0 { close(appSideFd); appSideFd = -1 }
         if tunSideFd >= 0 { close(tunSideFd); tunSideFd = -1 }
-        readBuf?.deallocate(); readBuf = nil
+        rxPool.forEach { $0.deallocate() }
+        rxPool.removeAll()
+        txIov?.deallocate(); txIov = nil
 
         hev_socks5_tunnel_quit()
         _ = LibXrayStopXray()
