@@ -2,7 +2,7 @@ name: Build & Upload to TestFlight
 
 on:
   push:
-    branches: [main, claude/reduce-memory-usage-BwFrG]
+    branches: [main, claude/reduce-memory-usage-BwFrG, claude/review-project-structure-YAZJR]
   workflow_dispatch:
 
 jobs:
