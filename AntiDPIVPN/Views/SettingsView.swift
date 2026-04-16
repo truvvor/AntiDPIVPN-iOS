@@ -22,13 +22,12 @@ struct SettingsView: View {
                         HStack {
                             Label("SOCKS Port", systemImage: "network")
                             Spacer()
-                            TextField("Port", value: $viewModel.socksPort, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .keyboardType(.numberPad)
-                                .frame(width: 80)
+                            Text("3080")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
                         }
 
-                        Text("Default SOCKS proxy port is 3080")
+                        Text("SOCKS proxy port is fixed at 3080")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
