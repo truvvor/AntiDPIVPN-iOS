@@ -301,11 +301,14 @@ class VPNViewModel: ObservableObject {
             bandwidth = currentProfile.antiDPISettings.bandwidthLimitKBs
         }
 
-        var debugLogPath: String? = nil
+        // Mimicry debug log used to fire ~60 writes/sec per active connection —
+        // thousands of sync I/O + Go allocations per minute inside an NE
+        // extension with a ~50MB memory budget. Keep xray-core.log (warning
+        // level, ~1 write/sec), drop the per-write debug dump.
+        let debugLogPath: String? = nil
         if let containerURL = sharedContainerURL {
             let logsDir = containerURL.appendingPathComponent("Logs")
             try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
-            debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
         }
 
         // Expand geosite rules in main app (no memory limit here)

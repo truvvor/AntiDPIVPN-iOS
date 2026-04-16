@@ -57,12 +57,16 @@ struct ConfigGenerator {
             logConfig["error"] = xrayLogPath
         }
 
-        // Connection policy: fast cleanup of idle connections
+        // Connection policy: aggressive idle cleanup.
+        // connIdle was 60s. Under a Telegram-style 50+ conn/burst, that held
+        // ~300 xray goroutines alive for a minute (REALITY + mimicry state
+        // ~50KB each → 15MB of "zombie" heap per burst). 15s drains that
+        // in a quarter of the time.
         let policy: [String: Any] = [
             "levels": [
                 "0": [
                     "handshake": 4,
-                    "connIdle": 60,
+                    "connIdle": 15,
                     "uplinkOnly": 2,
                     "downlinkOnly": 5
                 ] as [String: Any]

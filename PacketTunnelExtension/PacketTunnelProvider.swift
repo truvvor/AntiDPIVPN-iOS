@@ -180,6 +180,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         fileLog("Calling LibXrayRunXrayFromJSON...")
         flushLog()
 
+        // Bound Go heap BEFORE LibXray init. Without these, Go waits for
+        // 2x heap-growth before GC, which on a high-churn workload (REALITY
+        // handshakes + mimicry goroutines per connection) drifts the RSS
+        // past iOS jetsam (~50MB) within seconds of a connection burst.
+        // 45MiB leaves room for hev + Swift heap; GOGC=50 triggers GC at
+        // 1.5x live set instead of the default 2x.
+        setenv("GOMEMLIMIT", "45MiB", 1)
+        setenv("GOGC", "50", 1)
+
         let responseBase64 = LibXrayRunXrayFromJSON(base64String)
 
         let m1 = getMemoryMB()
@@ -213,7 +222,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 40) — correct relay, scratch=\(readBufSize)B, TX iovec pool")
+        fileLog("Starting tunnel (build 41) — GOMEMLIMIT=45MiB GOGC=50, mimicry-debug off, connIdle=15s")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
