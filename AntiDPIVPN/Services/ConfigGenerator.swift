@@ -89,9 +89,20 @@ struct ConfigGenerator {
         // DNS handled by system (NEDNSSettings) — xray dns section causes
         // circular dependency: xray tries to resolve DNS through VPN that needs DNS.
 
+        // Multiplex REALITY sessions. Without mux, every app-level TCP
+        // connection forces a new REALITY+MLKEM handshake + mimicry
+        // scheduler + finalmask state, ~80KB per connection. Under a
+        // Telegram-style burst (50+ concurrent connects in a few ms),
+        // this spikes RSS by ~4MB in one second and triggers iOS jetsam.
+        // concurrency=8: up to 8 app-level sub-streams ride on one
+        // REALITY session. Sub-stream cost ~1KB. Same burst now costs
+        // ~600KB of peak heap — inside the NE memory budget.
+        //
+        // xtls-rprx-vision supports mux since xray 1.8.6; each sub-stream
+        // still gets vision's anti-DPI flow characteristics.
         let muxSettings: [String: Any] = [
-            "enabled": false,
-            "concurrency": -1
+            "enabled": true,
+            "concurrency": 8
         ]
 
         let outbounds: [[String: Any]] = [
