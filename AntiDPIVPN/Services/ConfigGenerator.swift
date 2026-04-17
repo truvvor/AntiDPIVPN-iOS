@@ -2,7 +2,7 @@ import Foundation
 
 struct ConfigGenerator {
     /// Generate xray JSON config with routing and custom DNS support.
-    static func generateXrayConfig(from profile: VPNProfile, routeConfig: RouteConfig = RouteConfig(), bandwidthKBs: Int = 0, debugLogPath: String? = nil) -> String? {
+    static func generateXrayConfig(from profile: VPNProfile, routeConfig: RouteConfig = RouteConfig(), bandwidthKBs: Int = 0, debugLogPath: String? = nil, xrayLogPath: String? = nil) -> String? {
         let encryptionField: String
         if profile.antiDPISettings.enabled && !profile.nfsPublicKey.isEmpty {
             encryptionField = "mlkem768x25519plus.native.0rtt.\(profile.nfsPublicKey)"
@@ -51,10 +51,20 @@ struct ConfigGenerator {
         }
 
         var logConfig: [String: Any] = ["loglevel": "warning"]
-        if let logPath = debugLogPath {
-            let xrayLogPath = (logPath as NSString).deletingLastPathComponent + "/xray-core.log"
-            logConfig["access"] = xrayLogPath
-            logConfig["error"] = xrayLogPath
+        // Prefer the explicit xrayLogPath. Fall back to deriving from
+        // debugLogPath (legacy callers). Either way, xray-core.log gives
+        // us post-mortem visibility after the extension is killed.
+        let effectiveXrayLogPath: String?
+        if let p = xrayLogPath {
+            effectiveXrayLogPath = p
+        } else if let p = debugLogPath {
+            effectiveXrayLogPath = (p as NSString).deletingLastPathComponent + "/xray-core.log"
+        } else {
+            effectiveXrayLogPath = nil
+        }
+        if let p = effectiveXrayLogPath {
+            logConfig["access"] = p
+            logConfig["error"] = p
         }
 
         // Connection policy: aggressive idle cleanup.

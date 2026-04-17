@@ -70,8 +70,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let logsDir = containerURL.appendingPathComponent("Logs")
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
         let logURL = logsDir.appendingPathComponent("tunnel.log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+
+        // Preserve history across crash+auto-reconnect. If the previous
+        // session died silently, iOS restarts the extension and we used to
+        // wipe the log — losing the last messages before the kill. Now we
+        // append, with a 1MB soft cap: when size exceeds, rotate current
+        // to tunnel.log.prev and start fresh. Gives us at most ~2MB of
+        // rolling history — enough for the post-crash forensic window.
+        let maxSize: UInt64 = 1_048_576
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: logURL.path),
+           let size = attrs[.size] as? UInt64, size > maxSize {
+            let prevURL = logsDir.appendingPathComponent("tunnel.log.prev")
+            try? FileManager.default.removeItem(at: prevURL)
+            try? FileManager.default.moveItem(at: logURL, to: prevURL)
+        }
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
         logFileHandle = FileHandle(forWritingAtPath: logURL.path)
+        logFileHandle?.seekToEndOfFile()
+
+        // Clear session separator so the crashed previous session is
+        // distinguishable from this one in the combined log.
+        let sep = "\n===== Session start build 44 at \(Date()) =====\n"
+        if let data = sep.data(using: .utf8) {
+            logFileHandle?.write(data)
+        }
 
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         timer.schedule(deadline: .now() + 5, repeating: 5)
@@ -235,7 +259,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 43) — proactive FreeOSMemory on avail<20MB")
+        fileLog("Starting tunnel (build 44) — persistent tunnel.log + xray-core.log restored")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -477,7 +501,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             flushLog()
             var allLogs = ""
             if let containerURL = sharedContainerURL {
-                for logFile in ["tunnel.log", "antidpi-debug.log", "xray-core.log"] {
+                // tunnel.log.prev first — that's the crashed-session history
+                // that's most interesting for forensics. tunnel.log is the
+                // current live session.
+                for logFile in ["tunnel.log.prev", "tunnel.log", "antidpi-debug.log", "xray-core.log"] {
                     let path = containerURL.appendingPathComponent("Logs/\(logFile)").path
                     if let data = FileManager.default.contents(atPath: path),
                        let text = String(data: data, encoding: .utf8), !text.isEmpty {

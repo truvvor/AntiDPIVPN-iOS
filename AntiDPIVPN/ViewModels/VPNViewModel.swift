@@ -301,14 +301,15 @@ class VPNViewModel: ObservableObject {
             bandwidth = currentProfile.antiDPISettings.bandwidthLimitKBs
         }
 
-        // Mimicry debug log used to fire ~60 writes/sec per active connection —
-        // thousands of sync I/O + Go allocations per minute inside an NE
-        // extension with a ~50MB memory budget. Keep xray-core.log (warning
-        // level, ~1 write/sec), drop the per-write debug dump.
+        // debugLogPath = mimicry per-write dump (60 writes/sec, I/O-heavy) — keep off.
+        // xrayLogPath = xray-core warning-level log (~1/sec, cheap) — keep on. This
+        // is our only Go-side signal after the extension is killed.
         let debugLogPath: String? = nil
+        var xrayLogPath: String? = nil
         if let containerURL = sharedContainerURL {
             let logsDir = containerURL.appendingPathComponent("Logs")
             try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+            xrayLogPath = logsDir.appendingPathComponent("xray-core.log").path
         }
 
         // Expand geosite rules in main app (no memory limit here)
@@ -322,7 +323,7 @@ class VPNViewModel: ObservableObject {
         }
 
         guard let config = ConfigGenerator.generateXrayConfig(
-            from: currentProfile, routeConfig: expandedRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
+            from: currentProfile, routeConfig: expandedRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath, xrayLogPath: xrayLogPath
         ) else {
             addLog("Failed to generate Xray config")
             return
