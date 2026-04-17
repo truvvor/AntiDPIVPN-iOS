@@ -153,9 +153,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if m.avail < 20.0 {
                 // Proactive: don't wait for an iOS pressure event that won't
                 // come. Ask Go to return freed pages to the kernel now.
-                LibXrayLibXrayFreeOSMemory()
-                let after = self.getMemoryMB()
-                self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) — proactive FreeOSMemory → used=\(String(format: "%.1f", after.used))MB avail=\(String(format: "%.1f", after.avail))MB")
+                // TEMPORARILY DISABLED: the sync.Pool rebuild of LibXray lost
+                // the LibXrayLibXrayFreeOSMemory export. sync.Pool reduces
+                // allocation churn enough that FreeOSMemory is less critical,
+                // but we should restore the export in the next Xray-core
+                // rebuild. Logging only for now.
+                self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) — low avail, FreeOSMemory export missing")
                 self.flushLog()
             } else {
                 self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
@@ -259,7 +262,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 52) — sync.Pool in mimicry+finalmask + mux=16")
+        fileLog("Starting tunnel (build 52) — sync.Pool LibXray, FreeOSMemory export missing (stubbed)")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -443,10 +446,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             guard let self = self else { return }
             let event = source.data
             let level = event.contains(.critical) ? "critical" : "warning"
-            let before = self.getMemoryMB()
-            LibXrayLibXrayFreeOSMemory()
-            let after = self.getMemoryMB()
-            self.fileLog("MEMPRESSURE: \(level) — FreeOSMemory \(String(format: "%.1f", before.used))→\(String(format: "%.1f", after.used))MB avail \(String(format: "%.1f", before.avail))→\(String(format: "%.1f", after.avail))MB")
+            let m = self.getMemoryMB()
+            // TEMPORARILY DISABLED: sync.Pool rebuild of LibXray lost the
+            // LibXrayLibXrayFreeOSMemory export. See comment in
+            // startMemoryMonitor(). Logging only.
+            self.fileLog("MEMPRESSURE: \(level) — used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB (FreeOSMemory export missing)")
             self.flushLog()
         }
         memPressureSource = source
