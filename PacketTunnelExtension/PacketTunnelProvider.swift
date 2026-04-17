@@ -112,16 +112,30 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func startMemoryMonitor() {
-        // Diagnostic-only: no stall-triggered restart. Under screen-off or
-        // idle conditions, "no traffic for 60s" is normal; restarting xray
-        // under any concurrent real traffic tears down live REALITY sessions
-        // and was a caskadic-failure amplifier under connection bursts.
+        // Diagnostic + proactive memory reclamation.
+        //
+        // DispatchSource.memoryPressure fires on SYSTEM-wide pressure, not when
+        // a NE extension hits its own ~50MB per-process limit. On a 12GB device
+        // iOS sees no global shortage even when we're seconds away from jetsam,
+        // so we must poll our own budget via os_proc_available_memory() and
+        // call FreeOSMemory() ourselves. Without this, Go GC frees heap
+        // internally but RSS stays at peak, and eventually mmap() returns
+        // ENOMEM → runtime.throw("out of memory") → SIGABRT.
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         timer.schedule(deadline: .now() + 5, repeating: 15)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
-            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
+            if m.avail < 20.0 {
+                // Proactive: don't wait for an iOS pressure event that won't
+                // come. Ask Go to return freed pages to the kernel now.
+                LibXrayLibXrayFreeOSMemory()
+                let after = self.getMemoryMB()
+                self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) — proactive FreeOSMemory → used=\(String(format: "%.1f", after.used))MB avail=\(String(format: "%.1f", after.avail))MB")
+                self.flushLog()
+            } else {
+                self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
+            }
         }
         memoryTimer = timer
         timer.resume()
@@ -221,7 +235,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 42) — mem-pressure hook + RX backpressure")
+        fileLog("Starting tunnel (build 43) — proactive FreeOSMemory on avail<20MB")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
