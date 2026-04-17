@@ -95,14 +95,19 @@ struct ConfigGenerator {
         // Telegram-style burst (50+ concurrent connects in a few ms),
         // this spikes RSS by ~4MB in one second and triggers iOS jetsam.
         // concurrency=8: up to 8 app-level sub-streams ride on one
-        // REALITY session. Sub-stream cost ~1KB. Same burst now costs
-        // ~600KB of peak heap — inside the NE memory budget.
+        // REALITY session. Sub-stream cost ~1KB.
+        //
+        // xudpConcurrency=16: same treatment for UDP. Without this, iOS's
+        // synchronous DNS storm at tunnel start (40+ parallel queries to
+        // 8.8.8.8:53 when apps wake up) creates one REALITY session per
+        // query — the remaining root cause of crashes after TCP mux.
         //
         // xtls-rprx-vision supports mux since xray 1.8.6; each sub-stream
         // still gets vision's anti-DPI flow characteristics.
         let muxSettings: [String: Any] = [
             "enabled": true,
-            "concurrency": 8
+            "concurrency": 8,
+            "xudpConcurrency": 16
         ]
 
         let outbounds: [[String: Any]] = [
@@ -192,6 +197,23 @@ struct ConfigGenerator {
             "network": "udp",
             "port": "443",
             "outboundTag": "block"
+        ] as [String: Any])
+
+        // Route DNS (UDP/53) direct, bypassing REALITY entirely.
+        // On tunnel startup iOS fires a synchronous storm of DNS queries
+        // (40+ parallel to 8.8.8.8:53 when apps wake up). Each query
+        // through proxy creates its own REALITY+mimicry state — ~80KB
+        // each, ~3MB in 200ms, enough to push the NE extension past its
+        // ~50MB jetsam budget. freedom outbound bypasses all of that:
+        // DNS packets exit via the system socket (NE extensions are
+        // already excluded from their own tunnel, no loop risk).
+        // Trade-off: DNS queries visible to the ISP. Acceptable because
+        // iOS already specified the DNS server publicly via NEDNSSettings.
+        rules.append([
+            "type": "field",
+            "network": "udp",
+            "port": "53",
+            "outboundTag": "direct"
         ] as [String: Any])
 
         if routeConfig.isActive {
