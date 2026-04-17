@@ -58,16 +58,15 @@ struct ConfigGenerator {
             logConfig["error"] = p
         }
 
-        // Connection policy. Without mux, each REALITY session corresponds
-        // to one app-level TCP connection, so connIdle directly controls
-        // goroutine lifetime. 60s is a balance: short enough that idle
-        // sessions drain before piling up in Telegram-burst scenarios,
-        // long enough that short keepalives don't re-handshake constantly.
+        // Connection policy. With mux on, one REALITY session carries
+        // up to 8 TCP + 16 UDP sub-streams. connIdle=120 lets mux
+        // accumulate more app-level connections on one tunnel,
+        // amortizing handshake + mimicry + finalmask init cost.
         let policy: [String: Any] = [
             "levels": [
                 "0": [
                     "handshake": 4,
-                    "connIdle": 60,
+                    "connIdle": 120,
                     "uplinkOnly": 2,
                     "downlinkOnly": 5
                 ] as [String: Any]
@@ -80,19 +79,23 @@ struct ConfigGenerator {
         // DNS handled by system (NEDNSSettings) — xray dns section causes
         // circular dependency: xray tries to resolve DNS through VPN that needs DNS.
 
-        // Mux DISABLED. Empirically on this server+protocol combo
-        // (VLESS + xtls-rprx-vision + REALITY + MLKEM), enabling mux
-        // DEGRADES stability: build 43 with mux-off held 38 minutes
-        // under bursty load; builds 45-46 with mux-on crashed at 50-95
-        // seconds. vision does its own pattern shaping on the TLS
-        // stream; mux layers sub-streams on top, and the per-sub-stream
-        // mimicry+finalmask state accumulates faster than the "one
-        // REALITY session, many sub-streams" calculus suggested on
-        // paper. Without a visible per-session improvement there's
-        // no reason to pay the overhead.
+        // Mux RE-ENABLED. Earlier builds 45-46 with mux crashed not
+        // because of a theoretical mux+vision incompatibility (my prior
+        // assumption) but because of a concrete server-side bug in the
+        // VLESS inbound: when account.Flow == xtls-rprx-vision and
+        // request.Command == RequestCommandMux, the server forced
+        // AllowedNetwork = UDP and rejected every TCP sub-stream with
+        // "unexpected network TCP". Server was fixed by clearing the
+        // account.Flow; this client is updated to match (see above).
+        //
+        // With the server accepting TCP mux sub-streams, the original
+        // memory calculus holds: 50-connection burst costs 7 REALITY
+        // sessions instead of 50 (× ~6 less peak heap). xudp covers
+        // UDP bursts that aren't already routed to direct.
         let muxSettings: [String: Any] = [
-            "enabled": false,
-            "concurrency": -1
+            "enabled": true,
+            "concurrency": 8,
+            "xudpConcurrency": 16
         ]
 
         let outbounds: [[String: Any]] = [
@@ -107,7 +110,23 @@ struct ConfigGenerator {
                             "users": [
                                 [
                                     "id": profile.uuid,
-                                    "flow": "xtls-rprx-vision",
+                                    // Flow intentionally empty. Server was
+                                    // updated to set account.Flow = "" so
+                                    // that the VLESS inbound doesn't force
+                                    // AllowedNetwork=UDP on mux sub-streams
+                                    // (bug: when account.Flow == XRV and
+                                    // RequestCommand == Mux, server rejected
+                                    // all TCP sub-streams as "unexpected
+                                    // network TCP"). With server's flow
+                                    // cleared, client must match — otherwise
+                                    // VLESS per-user auth mismatches.
+                                    // Trade-off: lose xtls-rprx-vision's
+                                    // flow shaping on the stream; gain mux
+                                    // (connection state amortized 6x+ under
+                                    // bursts). REALITY+MLKEM+mimicry+
+                                    // finalmask are all still in place for
+                                    // ТСПУ evasion.
+                                    "flow": "",
                                     "encryption": encryptionField
                                 ] as [String: Any]
                             ]
