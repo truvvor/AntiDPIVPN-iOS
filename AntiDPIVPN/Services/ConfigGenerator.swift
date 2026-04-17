@@ -10,40 +10,27 @@ struct ConfigGenerator {
             encryptionField = "none"
         }
 
-        // Build 47: anti-DPI obfuscation layers DISABLED to isolate the
-        // source of runaway memory. With mux on + UDP/53 direct, build 46
-        // still grew 42→67MB in 20s under normal browsing, triggered 17
-        // MEMPRESSURE critical events in 10 seconds, and FreeOSMemory
-        // returned ~0MB each time. That's not connection state (mux
-        // handles it) and not DNS storm (direct handles it). The
-        // remaining heavy allocator is per-packet processing inside
-        // mimicry.Write() and finalmask.fragmentConn.Write() — both
-        // allocate transient chunk buffers on every outgoing write, at
-        // ~400 pkt/sec that compounds into multi-MB/sec heap churn.
-        //
-        // REALITY+MLKEM+Vision alone (this baseline) gives us plain TLS
-        // masquerading: server presents as www.samsung.com, content is
-        // MLKEM-encrypted, Vision provides flow characteristics. ТСПУ
-        // evasion still works via REALITY's fingerprint mimicry (not to
-        // be confused with our "mimicry" engine). Once stable, re-enable
-        // finalmask and mimicry one at a time to identify the culprit.
-        let realityBaseline = true
-
+        // Anti-DPI obfuscation layers — kept ON (server expects them).
+        // Tuning to reduce allocation churn without changing the wire
+        // protocol:
+        //   autoRotate=false: kills the per-connection rotation timer
+        //     goroutine. Phase stays fixed at webrtc_zoom, which is still
+        //     full DPI masquerade. Rotation was shedding a ticker +
+        //     state machine per REALITY session.
+        //   rotateAfter: irrelevant with autoRotate=off, kept for clarity.
         var realitySettings: [String: Any] = [
             "show": false,
             "fingerprint": profile.realityFingerprint,
             "serverName": profile.realityServerName,
             "publicKey": profile.realityPublicKey,
-            "shortId": profile.realityShortId
-        ]
-        if !realityBaseline {
-            realitySettings["mimicry"] = [
+            "shortId": profile.realityShortId,
+            "mimicry": [
                 "profile": "webrtc_zoom",
-                "autoRotate": true,
+                "autoRotate": false,
                 "rotateAfter": 300,
                 "sensitivity": 0.12
             ]
-        }
+        ]
 
         let bandwidthBytes = bandwidthKBs > 0 ? bandwidthKBs * 1024 : 0
         if bandwidthBytes > 0 {
@@ -71,16 +58,20 @@ struct ConfigGenerator {
             logConfig["error"] = p
         }
 
-        // Connection policy: aggressive idle cleanup.
-        // connIdle was 60s. Under a Telegram-style 50+ conn/burst, that held
-        // ~300 xray goroutines alive for a minute (REALITY + mimicry state
-        // ~50KB each → 15MB of "zombie" heap per burst). 15s drains that
-        // in a quarter of the time.
+        // Connection policy.
+        // connIdle=120: with mux on, the REALITY session is shared by up
+        // to 8 TCP + 16 UDP sub-streams. Closing it aggressively (prev
+        // 15s) forces re-handshake + mimicry re-init on every new wave
+        // of activity, paying the expensive setup cost repeatedly.
+        // Holding it 2 minutes lets mux agglomerate more app-level
+        // sessions onto one REALITY tunnel, spreading the init cost.
+        // Goroutine leak from zombie connections is no longer an issue
+        // because mux sub-streams are lightweight (~1KB vs ~80KB raw).
         let policy: [String: Any] = [
             "levels": [
                 "0": [
                     "handshake": 4,
-                    "connIdle": 15,
+                    "connIdle": 120,
                     "uplinkOnly": 2,
                     "downlinkOnly": 5
                 ] as [String: Any]
@@ -133,14 +124,7 @@ struct ConfigGenerator {
                         ] as [String: Any]
                     ]
                 ],
-                "streamSettings": realityBaseline ? ([
-                    "network": "tcp",
-                    "security": "reality",
-                    "realitySettings": realitySettings,
-                    "sockopt": [
-                        "tcpKeepAliveInterval": 15
-                    ] as [String: Any]
-                ] as [String: Any]) : ([
+                "streamSettings": [
                     "network": "tcp",
                     "security": "reality",
                     "realitySettings": realitySettings,
@@ -159,7 +143,7 @@ struct ConfigGenerator {
                     "sockopt": [
                         "tcpKeepAliveInterval": 15
                     ] as [String: Any]
-                ] as [String: Any]),
+                ] as [String: Any],
                 "mux": muxSettings
             ] as [String: Any],
             [
