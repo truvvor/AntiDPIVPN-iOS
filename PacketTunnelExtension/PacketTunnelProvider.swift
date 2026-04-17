@@ -2,19 +2,18 @@ import NetworkExtension
 import Network
 import os.log
 
-/// Build 40 — Correct relay + TX iovec pool.
-/// RX: single 2KB scratch buffer. Per-packet Data copy (cheap, short-lived,
-/// released by ARC once NE's async writePackets processes it).
+/// Build 42 — iOS memory-pressure hook + adaptive RX backpressure.
+/// Works with LibXray built with runtime/debug.SetMemoryLimit(45MiB)+
+/// SetGCPercent(50) in init() and exported LibXrayLibXrayFreeOSMemory.
 ///
-/// Build 39 regression: used Data(bytesNoCopy:deallocator:.none) against a
-/// 128-slot ring. writePackets is ASYNC — NE retains the Data and writes
-/// later, but the ring rotated and read() overwrote slots while NE still
-/// held references. Result: corrupted packets delivered to NE (TLS
-/// handshakes failed, apps fell back to other paths → WAN IP leak) and
-/// memory bloat from NE's in-flight retain queue (RSS 43→83 MB in 35s).
+/// On iOS memory-pressure events, explicitly ask Go to return freed
+/// heap pages to the kernel — without this, Go GC's internally but RSS
+/// stays at peak and iOS reads RSS for jetsam decisions.
 ///
-/// TX: one preallocated iovec[2], reused per writev. Safe because writev
-/// is synchronous — the iovec contents are consumed before the call returns.
+/// On readPackets, when os_proc_available_memory reports tight headroom,
+/// defer the next read. This propagates as TCP backpressure to apps
+/// on-device, slowing new connection creation and letting Go drain
+/// existing goroutine state before more arrives.
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1
@@ -29,6 +28,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // Network change detection (diagnostic-only — no auto-restart)
     private var pathMonitor: NWPathMonitor?
     private var currentNetworkPath: String = ""
+
+    // iOS memory-pressure source — forces Go to return heap to kernel
+    // on warning/critical events so RSS doesn't stay at peak after a
+    // connection burst. Needs LibXrayLibXrayFreeOSMemory export.
+    private var memPressureSource: DispatchSourceMemoryPressure?
 
     // Stats
     private var packetsSent: UInt64 = 0
@@ -180,15 +184,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         fileLog("Calling LibXrayRunXrayFromJSON...")
         flushLog()
 
-        // Bound Go heap BEFORE LibXray init. Without these, Go waits for
-        // 2x heap-growth before GC, which on a high-churn workload (REALITY
-        // handshakes + mimicry goroutines per connection) drifts the RSS
-        // past iOS jetsam (~50MB) within seconds of a connection burst.
-        // 45MiB leaves room for hev + Swift heap; GOGC=50 triggers GC at
-        // 1.5x live set instead of the default 2x.
-        setenv("GOMEMLIMIT", "45MiB", 1)
-        setenv("GOGC", "50", 1)
-
+        // GC + memory limit are now set programmatically inside LibXray's
+        // init() via runtime/debug.SetMemoryLimit(45MiB)+SetGCPercent(50).
+        // setenv() here used to be a no-op because Go reads env only at
+        // dyld load, before Swift runs.
         let responseBase64 = LibXrayRunXrayFromJSON(base64String)
 
         let m1 = getMemoryMB()
@@ -222,7 +221,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 41) — GOMEMLIMIT=45MiB GOGC=50, mimicry-debug off, connIdle=15s")
+        fileLog("Starting tunnel (build 42) — mem-pressure hook + RX backpressure")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -279,6 +278,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.startTun2Socks(socksPort: 3080)
             self.isTunnelRunning = true
             self.startMemoryMonitor()
+            self.startMemoryPressureMonitor()
             self.startNetworkMonitor()
             let m1 = self.getMemoryMB()
             self.fileLog("MEM@ready: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
@@ -339,6 +339,31 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    /// Reschedule the next readPackets based on current memory headroom.
+    /// The signal loop: low avail → defer read → TCP backpressure to apps
+    /// on-device → fewer new connections → Go goroutine churn drops →
+    /// GC + FreeOSMemory drain RSS → avail recovers → throughput resumes.
+    private func rescheduleReadPacketFlow() {
+        let availBytes = os_proc_available_memory()
+        let delayMs: Int
+        if availBytes < 8 * 1_048_576 {
+            delayMs = 200
+        } else if availBytes < 15 * 1_048_576 {
+            delayMs = 50
+        } else {
+            delayMs = 0
+        }
+        if delayMs == 0 {
+            startReadingFromPacketFlow()
+        } else {
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + .milliseconds(delayMs)
+            ) { [weak self] in
+                self?.startReadingFromPacketFlow()
+            }
+        }
+    }
+
     /// packetFlow → tun2socks (always forward, never drop)
     private func startReadingFromPacketFlow() {
         packetFlow.readPackets { [weak self] packets, protocols in
@@ -361,8 +386,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 if written == totalLen { self.packetsSent += 1 }
                 else { self.packetsDropped += 1 }
             }
-            self.startReadingFromPacketFlow()
+            self.rescheduleReadPacketFlow()
         }
+    }
+
+    // MARK: - Memory Pressure
+
+    /// Subscribe to iOS memory-pressure events and ask Go to return heap
+    /// pages on warning/critical. Without this call into the runtime,
+    /// Go's GC frees memory internally but RSS stays at peak and iOS
+    /// sees it for jetsam decisions.
+    private func startMemoryPressureMonitor() {
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let event = source.data
+            let level = event.contains(.critical) ? "critical" : "warning"
+            let before = self.getMemoryMB()
+            LibXrayLibXrayFreeOSMemory()
+            let after = self.getMemoryMB()
+            self.fileLog("MEMPRESSURE: \(level) — FreeOSMemory \(String(format: "%.1f", before.used))→\(String(format: "%.1f", after.used))MB avail \(String(format: "%.1f", before.avail))→\(String(format: "%.1f", after.avail))MB")
+            self.flushLog()
+        }
+        memPressureSource = source
+        source.resume()
     }
 
     /// tun2socks → packetFlow (always forward, never drop)
@@ -480,6 +530,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         isRelayRunning = false
 
         memoryTimer?.cancel(); memoryTimer = nil
+        memPressureSource?.cancel(); memPressureSource = nil
         pathMonitor?.cancel(); pathMonitor = nil
         readSource?.cancel(); readSource = nil
 
