@@ -75,9 +75,13 @@ struct ConfigGenerator {
         // DNS handled by system (NEDNSSettings) — xray dns section causes
         // circular dependency: xray tries to resolve DNS through VPN that needs DNS.
 
+        // Mux multiplexes app-level TCP connections over a small pool of
+        // REALITY sessions. 50 Telegram conns → ~7 REALITY sessions instead
+        // of 50. Cuts burst memory from ~4 MB to ~600 KB.
+        // NOTE: Vision flow must be empty when mux is enabled (incompatible).
         let muxSettings: [String: Any] = [
-            "enabled": false,
-            "concurrency": -1
+            "enabled": true,
+            "concurrency": 8
         ]
 
         let outbounds: [[String: Any]] = [
@@ -92,7 +96,7 @@ struct ConfigGenerator {
                             "users": [
                                 [
                                     "id": profile.uuid,
-                                    "flow": "xtls-rprx-vision",
+                                    "flow": "",
                                     "encryption": encryptionField
                                 ] as [String: Any]
                             ]
