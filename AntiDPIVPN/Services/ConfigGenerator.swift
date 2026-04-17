@@ -10,36 +10,40 @@ struct ConfigGenerator {
             encryptionField = "none"
         }
 
-        // Anti-DPI: fragment ClientHello
-        let finalmask: [String: Any] = [
-            "tcp": [
-                [
-                    "type": "fragment",
-                    "settings": [
-                        "packets": "tlshello",
-                        "length": "150-250",
-                        "delay": "50-100"
-                    ] as [String: Any]
-                ] as [String: Any]
-            ]
-        ]
-
-        // Traffic mimicry
-        let mimicry: [String: Any] = [
-            "profile": "webrtc_zoom",
-            "autoRotate": true,
-            "rotateAfter": 300,
-            "sensitivity": 0.12
-        ]
+        // Build 47: anti-DPI obfuscation layers DISABLED to isolate the
+        // source of runaway memory. With mux on + UDP/53 direct, build 46
+        // still grew 42→67MB in 20s under normal browsing, triggered 17
+        // MEMPRESSURE critical events in 10 seconds, and FreeOSMemory
+        // returned ~0MB each time. That's not connection state (mux
+        // handles it) and not DNS storm (direct handles it). The
+        // remaining heavy allocator is per-packet processing inside
+        // mimicry.Write() and finalmask.fragmentConn.Write() — both
+        // allocate transient chunk buffers on every outgoing write, at
+        // ~400 pkt/sec that compounds into multi-MB/sec heap churn.
+        //
+        // REALITY+MLKEM+Vision alone (this baseline) gives us plain TLS
+        // masquerading: server presents as www.samsung.com, content is
+        // MLKEM-encrypted, Vision provides flow characteristics. ТСПУ
+        // evasion still works via REALITY's fingerprint mimicry (not to
+        // be confused with our "mimicry" engine). Once stable, re-enable
+        // finalmask and mimicry one at a time to identify the culprit.
+        let realityBaseline = true
 
         var realitySettings: [String: Any] = [
             "show": false,
             "fingerprint": profile.realityFingerprint,
             "serverName": profile.realityServerName,
             "publicKey": profile.realityPublicKey,
-            "shortId": profile.realityShortId,
-            "mimicry": mimicry
+            "shortId": profile.realityShortId
         ]
+        if !realityBaseline {
+            realitySettings["mimicry"] = [
+                "profile": "webrtc_zoom",
+                "autoRotate": true,
+                "rotateAfter": 300,
+                "sensitivity": 0.12
+            ]
+        }
 
         let bandwidthBytes = bandwidthKBs > 0 ? bandwidthKBs * 1024 : 0
         if bandwidthBytes > 0 {
@@ -129,15 +133,33 @@ struct ConfigGenerator {
                         ] as [String: Any]
                     ]
                 ],
-                "streamSettings": [
+                "streamSettings": realityBaseline ? ([
                     "network": "tcp",
                     "security": "reality",
                     "realitySettings": realitySettings,
-                    "finalmask": finalmask,
                     "sockopt": [
                         "tcpKeepAliveInterval": 15
                     ] as [String: Any]
-                ] as [String: Any],
+                ] as [String: Any]) : ([
+                    "network": "tcp",
+                    "security": "reality",
+                    "realitySettings": realitySettings,
+                    "finalmask": [
+                        "tcp": [
+                            [
+                                "type": "fragment",
+                                "settings": [
+                                    "packets": "tlshello",
+                                    "length": "150-250",
+                                    "delay": "50-100"
+                                ] as [String: Any]
+                            ] as [String: Any]
+                        ]
+                    ],
+                    "sockopt": [
+                        "tcpKeepAliveInterval": 15
+                    ] as [String: Any]
+                ] as [String: Any]),
                 "mux": muxSettings
             ] as [String: Any],
             [
