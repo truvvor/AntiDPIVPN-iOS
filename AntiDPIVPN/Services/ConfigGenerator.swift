@@ -88,13 +88,14 @@ struct ConfigGenerator {
         // "unexpected network TCP". Server was fixed by clearing the
         // account.Flow; this client is updated to match (see above).
         //
-        // With the server accepting TCP mux sub-streams, the original
-        // memory calculus holds: 50-connection burst costs 7 REALITY
-        // sessions instead of 50 (× ~6 less peak heap). xudp covers
-        // UDP bursts that aren't already routed to direct.
+        // concurrency=16: let one REALITY session carry more app-level
+        // streams. Build 50 at concurrency=8 held a stable 52-58MB floor
+        // for 10 minutes, but moderate TCP bursts (~20-30 connections/5s)
+        // still pushed RSS past the jetsam ceiling. Fewer REALITY sessions
+        // = fewer mimicry/finalmask state blocks live at any given moment.
         let muxSettings: [String: Any] = [
             "enabled": true,
-            "concurrency": 8,
+            "concurrency": 16,
             "xudpConcurrency": 16
         ]
 
