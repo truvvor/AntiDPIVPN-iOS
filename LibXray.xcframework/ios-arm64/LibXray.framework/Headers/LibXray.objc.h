@@ -98,6 +98,12 @@ FOUNDATION_EXPORT BOOL LibXrayGetXrayState(void);
 FOUNDATION_EXPORT NSString* _Nonnull LibXrayInitDns(NSString* _Nullable base64Text);
 
 /**
+ * LibXrayFreeOSMemory forces the Go runtime to release unused memory
+back to the OS. Called from iOS side on memory-pressure events.
+ */
+FOUNDATION_EXPORT void LibXrayLibXrayFreeOSMemory(void);
+
+/**
  * Init Dns Request
  */
 FOUNDATION_EXPORT NSString* _Nonnull LibXrayNewInitDnsRequest(NSString* _Nullable dns, NSString* _Nullable deviceName, NSError* _Nullable* _Nullable error);
