@@ -58,20 +58,16 @@ struct ConfigGenerator {
             logConfig["error"] = p
         }
 
-        // Connection policy.
-        // connIdle=120: with mux on, the REALITY session is shared by up
-        // to 8 TCP + 16 UDP sub-streams. Closing it aggressively (prev
-        // 15s) forces re-handshake + mimicry re-init on every new wave
-        // of activity, paying the expensive setup cost repeatedly.
-        // Holding it 2 minutes lets mux agglomerate more app-level
-        // sessions onto one REALITY tunnel, spreading the init cost.
-        // Goroutine leak from zombie connections is no longer an issue
-        // because mux sub-streams are lightweight (~1KB vs ~80KB raw).
+        // Connection policy. Without mux, each REALITY session corresponds
+        // to one app-level TCP connection, so connIdle directly controls
+        // goroutine lifetime. 60s is a balance: short enough that idle
+        // sessions drain before piling up in Telegram-burst scenarios,
+        // long enough that short keepalives don't re-handshake constantly.
         let policy: [String: Any] = [
             "levels": [
                 "0": [
                     "handshake": 4,
-                    "connIdle": 120,
+                    "connIdle": 60,
                     "uplinkOnly": 2,
                     "downlinkOnly": 5
                 ] as [String: Any]
@@ -84,25 +80,19 @@ struct ConfigGenerator {
         // DNS handled by system (NEDNSSettings) — xray dns section causes
         // circular dependency: xray tries to resolve DNS through VPN that needs DNS.
 
-        // Multiplex REALITY sessions. Without mux, every app-level TCP
-        // connection forces a new REALITY+MLKEM handshake + mimicry
-        // scheduler + finalmask state, ~80KB per connection. Under a
-        // Telegram-style burst (50+ concurrent connects in a few ms),
-        // this spikes RSS by ~4MB in one second and triggers iOS jetsam.
-        // concurrency=8: up to 8 app-level sub-streams ride on one
-        // REALITY session. Sub-stream cost ~1KB.
-        //
-        // xudpConcurrency=16: same treatment for UDP. Without this, iOS's
-        // synchronous DNS storm at tunnel start (40+ parallel queries to
-        // 8.8.8.8:53 when apps wake up) creates one REALITY session per
-        // query — the remaining root cause of crashes after TCP mux.
-        //
-        // xtls-rprx-vision supports mux since xray 1.8.6; each sub-stream
-        // still gets vision's anti-DPI flow characteristics.
+        // Mux DISABLED. Empirically on this server+protocol combo
+        // (VLESS + xtls-rprx-vision + REALITY + MLKEM), enabling mux
+        // DEGRADES stability: build 43 with mux-off held 38 minutes
+        // under bursty load; builds 45-46 with mux-on crashed at 50-95
+        // seconds. vision does its own pattern shaping on the TLS
+        // stream; mux layers sub-streams on top, and the per-sub-stream
+        // mimicry+finalmask state accumulates faster than the "one
+        // REALITY session, many sub-streams" calculus suggested on
+        // paper. Without a visible per-session improvement there's
+        // no reason to pay the overhead.
         let muxSettings: [String: Any] = [
-            "enabled": true,
-            "concurrency": 8,
-            "xudpConcurrency": 16
+            "enabled": false,
+            "concurrency": -1
         ]
 
         let outbounds: [[String: Any]] = [
