@@ -97,12 +97,6 @@ FOUNDATION_EXPORT BOOL LibXrayGetXrayState(void);
  */
 FOUNDATION_EXPORT NSString* _Nonnull LibXrayInitDns(NSString* _Nullable base64Text);
 
-FOUNDATION_EXPORT void LibXrayLibXrayFreeOSMemory(void);
-
-FOUNDATION_EXPORT void LibXrayLibXraySetGCPercent(long percent);
-
-FOUNDATION_EXPORT void LibXrayLibXraySetMemoryLimit(int64_t bytes);
-
 /**
  * Init Dns Request
  */
@@ -144,6 +138,12 @@ FOUNDATION_EXPORT NSString* _Nonnull LibXrayRunXray(NSString* _Nullable base64Te
  * Run Xray instance with JSON configuration.
  */
 FOUNDATION_EXPORT NSString* _Nonnull LibXrayRunXrayFromJSON(NSString* _Nullable base64Text);
+
+/**
+ * SetTunFd sets the TUN file descriptor.
+Call this BEFORE RunXray/RunXrayFromJSON.
+ */
+FOUNDATION_EXPORT void LibXraySetTunFd(int32_t fd);
 
 /**
  * Stop Xray instance.
