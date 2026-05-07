@@ -43,6 +43,9 @@ jobs:
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             archive \
             -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8 \
+            -authenticationKeyID 4RA5988Z6S \
+            -authenticationKeyIssuerID e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=WJWU38ALPB
 
@@ -54,7 +57,10 @@ jobs:
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -exportPath $RUNNER_TEMP/export \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -allowProvisioningUpdates
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8 \
+            -authenticationKeyID 4RA5988Z6S \
+            -authenticationKeyIssuerID e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc
 
           # Upload to TestFlight
           xcrun altool --upload-app \
