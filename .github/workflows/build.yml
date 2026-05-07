@@ -50,17 +50,37 @@ jobs:
             DEVELOPMENT_TEAM=WJWU38ALPB
 
           # Create ExportOptions
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>method</key>\n  <string>app-store-connect</string>\n  <key>uploadSymbols</key>\n  <false/>\n  <key>signingStyle</key>\n  <string>automatic</string>\n  <key>teamID</key>\n  <string>WJWU38ALPB</string>\n</dict>\n</plist>\n' > $RUNNER_TEMP/ExportOptions.plist
+          cat > $RUNNER_TEMP/ExportOptions.plist << 'EXPORTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>uploadSymbols</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>teamID</key>
+            <string>WJWU38ALPB</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.truvvor.secureconnect</key>
+              <string>appledistribution</string>
+              <key>com.truvvor.secureconnect.tunnel</key>
+              <string>appledistribution</string>
+            </dict>
+          </dict>
+          </plist>
+          EXPORTEOF
 
           # Export IPA
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             -exportPath $RUNNER_TEMP/export \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8 \
-            -authenticationKeyID 4RA5988Z6S \
-            -authenticationKeyIssuerID e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
 
           # Upload to TestFlight
           xcrun altool --upload-app \
