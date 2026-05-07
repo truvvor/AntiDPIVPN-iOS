@@ -68,9 +68,9 @@ jobs:
             <key>provisioningProfiles</key>
             <dict>
               <key>com.truvvor.secureconnect</key>
-              <string>appledistribution</string>
+              <string>SecureConnect AppStore</string>
               <key>com.truvvor.secureconnect.tunnel</key>
-              <string>appledistribution</string>
+              <string>SecureConnect Tunnel AppStore</string>
             </dict>
           </dict>
           </plist>
