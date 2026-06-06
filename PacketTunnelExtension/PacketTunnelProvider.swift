@@ -2,10 +2,18 @@ import NetworkExtension
 import Network
 import os.log
 
-/// Build 36 — Clean single-mode, no memory throttling.
-/// Trust iOS to manage memory. If extension is killed by jetsam,
-/// iOS auto-reconnects the VPN (disconnectOnSleep=false).
-/// connIdle=30s policy handles stale connection cleanup.
+/// Build 42 — iOS memory-pressure hook + adaptive RX backpressure.
+/// Works with LibXray built with runtime/debug.SetMemoryLimit(45MiB)+
+/// SetGCPercent(50) in init() and exported LibXrayLibXrayFreeOSMemory.
+///
+/// On iOS memory-pressure events, explicitly ask Go to return freed
+/// heap pages to the kernel — without this, Go GC's internally but RSS
+/// stays at peak and iOS reads RSS for jetsam decisions.
+///
+/// On readPackets, when os_proc_available_memory reports tight headroom,
+/// defer the next read. This propagates as TCP backpressure to apps
+/// on-device, slowing new connection creation and letting Go drain
+/// existing goroutine state before more arrives.
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var isTunnelRunning = false
     private var appSideFd: Int32 = -1
@@ -14,23 +22,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var readSource: DispatchSourceRead?
     private var memoryTimer: DispatchSourceTimer?
 
-    // Stall detection + auto-restart
-    private var lastTrafficTotal: UInt64 = 0
-    private var stallTicks: Int = 0
+    // Saved for in-place xray restart (used only from stopTunnel path now)
     private var savedConfigJSON: String = ""
 
-    // Network change detection
+    // Network change detection (diagnostic-only — no auto-restart)
     private var pathMonitor: NWPathMonitor?
     private var currentNetworkPath: String = ""
+
+    // iOS memory-pressure source — forces Go to return heap to kernel
+    // on warning/critical events so RSS doesn't stay at peak after a
+    // connection burst. Needs LibXrayLibXrayFreeOSMemory export.
+    private var memPressureSource: DispatchSourceMemoryPressure?
 
     // Stats
     private var packetsSent: UInt64 = 0
     private var packetsRecv: UInt64 = 0
     private var packetsDropped: UInt64 = 0
 
-    // Pre-allocated read buffer (reused across events)
+    // RX scratch buffer for read() from the socketpair. Contents are
+    // copied into a fresh Data before the next read(), so one buffer is
+    // safe. Do NOT hand this pointer to NE via Data(bytesNoCopy:) —
+    // writePackets is async and the buffer would be overwritten in-flight.
     private let readBufSize = 2048
     private var readBuf: UnsafeMutablePointer<UInt8>?
+
+    // Preallocated iovec pair for TX writev. Safe to reuse because writev
+    // is synchronous — consumes iov_base/iov_len before returning.
+    private var txIov: UnsafeMutablePointer<iovec>?
 
     // Pre-built AF headers
     private static let afInet4Header = Data([0, 0, 0, 2])
@@ -52,8 +70,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let logsDir = containerURL.appendingPathComponent("Logs")
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
         let logURL = logsDir.appendingPathComponent("tunnel.log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+
+        // Preserve history across crash+auto-reconnect. If the previous
+        // session died silently, iOS restarts the extension and we used to
+        // wipe the log — losing the last messages before the kill. Now we
+        // append, with a 1MB soft cap: when size exceeds, rotate current
+        // to tunnel.log.prev and start fresh. Gives us at most ~2MB of
+        // rolling history — enough for the post-crash forensic window.
+        let maxSize: UInt64 = 1_048_576
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: logURL.path),
+           let size = attrs[.size] as? UInt64, size > maxSize {
+            let prevURL = logsDir.appendingPathComponent("tunnel.log.prev")
+            try? FileManager.default.removeItem(at: prevURL)
+            try? FileManager.default.moveItem(at: logURL, to: prevURL)
+        }
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
         logFileHandle = FileHandle(forWritingAtPath: logURL.path)
+        logFileHandle?.seekToEndOfFile()
+
+        // Clear session separator so the crashed previous session is
+        // distinguishable from this one in the combined log.
+        let sep = "\n===== Session start build 44 at \(Date()) =====\n"
+        if let data = sep.data(using: .utf8) {
+            logFileHandle?.write(data)
+        }
 
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         timer.schedule(deadline: .now() + 5, repeating: 5)
@@ -94,26 +136,29 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func startMemoryMonitor() {
+        // Diagnostic + proactive memory reclamation.
+        //
+        // DispatchSource.memoryPressure fires on SYSTEM-wide pressure, not when
+        // a NE extension hits its own ~50MB per-process limit. On a 12GB device
+        // iOS sees no global shortage even when we're seconds away from jetsam,
+        // so we must poll our own budget via os_proc_available_memory() and
+        // call FreeOSMemory() ourselves. Without this, Go GC frees heap
+        // internally but RSS stays at peak, and eventually mmap() returns
+        // ENOMEM → runtime.throw("out of memory") → SIGABRT.
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         timer.schedule(deadline: .now() + 5, repeating: 15)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isTunnelRunning else { return }
             let m = self.getMemoryMB()
-            self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
-
-            // Stall detection: if no new packets for 60s (4 ticks × 15s), restart xray
-            let currentTotal = self.packetsSent + self.packetsRecv
-            if currentTotal > 0 && currentTotal == self.lastTrafficTotal {
-                self.stallTicks += 1
-                if self.stallTicks >= 4 {
-                    self.fileLog("STALL: no traffic for 60s — restarting xray")
-                    self.flushLog()
-                    self.restartXray()
-                    self.stallTicks = 0
-                }
+            if m.avail < 20.0 {
+                // Proactive: don't wait for an iOS pressure event that won't
+                // come. Ask Go to return freed pages to the kernel now.
+                LibXrayLibXrayFreeOSMemory()
+                let after = self.getMemoryMB()
+                self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv) — proactive FreeOSMemory → used=\(String(format: "%.1f", after.used))MB avail=\(String(format: "%.1f", after.avail))MB")
+                self.flushLog()
             } else {
-                self.stallTicks = 0
-                self.lastTrafficTotal = currentTotal
+                self.fileLog("MEM: used=\(String(format: "%.1f", m.used))MB avail=\(String(format: "%.1f", m.avail))MB pkts=\(self.packetsSent)/\(self.packetsRecv)")
             }
         }
         memoryTimer = timer
@@ -177,6 +222,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         fileLog("Calling LibXrayRunXrayFromJSON...")
         flushLog()
 
+        // GC + memory limit are now set programmatically inside LibXray's
+        // init() via runtime/debug.SetMemoryLimit(45MiB)+SetGCPercent(50).
+        // setenv() here used to be a no-op because Go reads env only at
+        // dyld load, before Swift runs.
         let responseBase64 = LibXrayRunXrayFromJSON(base64String)
 
         let m1 = getMemoryMB()
@@ -210,7 +259,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         setupFileLogging()
         let m0 = getMemoryMB()
-        fileLog("Starting tunnel (build 38) — routing, DNS, keepalive")
+        fileLog("Starting tunnel (build 53) — sync.Pool LibXray + FreeOSMemory export restored")
         fileLog("MEM@start: used=\(String(format: "%.1f", m0.used))MB avail=\(String(format: "%.1f", m0.avail))MB")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -267,6 +316,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.startTun2Socks(socksPort: 3080)
             self.isTunnelRunning = true
             self.startMemoryMonitor()
+            self.startMemoryPressureMonitor()
             self.startNetworkMonitor()
             let m1 = self.getMemoryMB()
             self.fileLog("MEM@ready: used=\(String(format: "%.1f", m1.used))MB avail=\(String(format: "%.1f", m1.avail))MB")
@@ -296,6 +346,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         fileLog("socketpair tunFd=\(tunSideFd) appFd=\(appSideFd) buf=128KB")
 
         readBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: readBufSize)
+        txIov = UnsafeMutablePointer<iovec>.allocate(capacity: 2)
 
         isRelayRunning = true
         startReadingFromPacketFlow()
@@ -326,11 +377,37 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    /// Reschedule the next readPackets based on current memory headroom.
+    /// The signal loop: low avail → defer read → TCP backpressure to apps
+    /// on-device → fewer new connections → Go goroutine churn drops →
+    /// GC + FreeOSMemory drain RSS → avail recovers → throughput resumes.
+    private func rescheduleReadPacketFlow() {
+        let availBytes = os_proc_available_memory()
+        let delayMs: Int
+        if availBytes < 8 * 1_048_576 {
+            delayMs = 200
+        } else if availBytes < 15 * 1_048_576 {
+            delayMs = 50
+        } else {
+            delayMs = 0
+        }
+        if delayMs == 0 {
+            startReadingFromPacketFlow()
+        } else {
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + .milliseconds(delayMs)
+            ) { [weak self] in
+                self?.startReadingFromPacketFlow()
+            }
+        }
+    }
+
     /// packetFlow → tun2socks (always forward, never drop)
     private func startReadingFromPacketFlow() {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self = self, self.isRelayRunning else { return }
 
+            guard let iov = self.txIov else { return }
             for (i, packet) in packets.enumerated() {
                 let protoNum = protocols[i] as! Int32
                 let afHeader = (protoNum == AF_INET6) ? Self.afInet6Header : Self.afInet4Header
@@ -339,18 +416,41 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     guard let packetBase = packetPtr.baseAddress else { return -1 }
                     return afHeader.withUnsafeBytes { headerPtr -> Int in
                         guard let headerBase = headerPtr.baseAddress else { return -1 }
-                        var iov = [
-                            iovec(iov_base: UnsafeMutableRawPointer(mutating: headerBase), iov_len: 4),
-                            iovec(iov_base: UnsafeMutableRawPointer(mutating: packetBase), iov_len: packet.count)
-                        ]
-                        return writev(self.appSideFd, &iov, 2)
+                        iov[0] = iovec(iov_base: UnsafeMutableRawPointer(mutating: headerBase), iov_len: 4)
+                        iov[1] = iovec(iov_base: UnsafeMutableRawPointer(mutating: packetBase), iov_len: packet.count)
+                        return writev(self.appSideFd, iov, 2)
                     }
                 }
                 if written == totalLen { self.packetsSent += 1 }
                 else { self.packetsDropped += 1 }
             }
-            self.startReadingFromPacketFlow()
+            self.rescheduleReadPacketFlow()
         }
+    }
+
+    // MARK: - Memory Pressure
+
+    /// Subscribe to iOS memory-pressure events and ask Go to return heap
+    /// pages on warning/critical. Without this call into the runtime,
+    /// Go's GC frees memory internally but RSS stays at peak and iOS
+    /// sees it for jetsam decisions.
+    private func startMemoryPressureMonitor() {
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let event = source.data
+            let level = event.contains(.critical) ? "critical" : "warning"
+            let before = self.getMemoryMB()
+            LibXrayLibXrayFreeOSMemory()
+            let after = self.getMemoryMB()
+            self.fileLog("MEMPRESSURE: \(level) — FreeOSMemory \(String(format: "%.1f", before.used))→\(String(format: "%.1f", after.used))MB avail \(String(format: "%.1f", before.avail))→\(String(format: "%.1f", after.avail))MB")
+            self.flushLog()
+        }
+        memPressureSource = source
+        source.resume()
     }
 
     /// tun2socks → packetFlow (always forward, never drop)
@@ -361,6 +461,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             var batchPackets: [Data] = []
             var batchProtos: [NSNumber] = []
+            batchPackets.reserveCapacity(32)
+            batchProtos.reserveCapacity(32)
 
             while true {
                 let n = read(self.appSideFd, buf, self.readBufSize)
@@ -368,6 +470,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
                 let af = UInt32(buf[0]) << 24 | UInt32(buf[1]) << 16 | UInt32(buf[2]) << 8 | UInt32(buf[3])
                 let proto: NSNumber = (af == 30) ? NSNumber(value: AF_INET6) : NSNumber(value: AF_INET)
+                // Copy into a fresh Data — writePackets is async and may retain
+                // the Data past the next read() call.
                 batchPackets.append(Data(bytes: buf + 4, count: n - 4))
                 batchProtos.append(proto)
 
@@ -397,7 +501,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             flushLog()
             var allLogs = ""
             if let containerURL = sharedContainerURL {
-                for logFile in ["tunnel.log", "antidpi-debug.log", "xray-core.log"] {
+                // tunnel.log.prev first — that's the crashed-session history
+                // that's most interesting for forensics. tunnel.log is the
+                // current live session.
+                for logFile in ["tunnel.log.prev", "tunnel.log", "antidpi-debug.log", "xray-core.log"] {
                     let path = containerURL.appendingPathComponent("Logs/\(logFile)").path
                     if let data = FileManager.default.contents(atPath: path),
                        let text = String(data: data, encoding: .utf8), !text.isEmpty {
@@ -417,24 +524,23 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // MARK: - Network Change Detection
 
     private func startNetworkMonitor() {
+        // Diagnostic-only. Path flicker on cellular/Wi-Fi under load used to
+        // trigger restartXray(), which tore down live REALITY sessions in the
+        // middle of traffic bursts — a major contributor to tunnel death.
+        // xray itself recovers from transient connectivity via TCP retries;
+        // a full xray restart is worse than any brief stall.
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self = self, self.isTunnelRunning else { return }
             let desc = path.usesInterfaceType(.wifi) ? "wifi" :
                        path.usesInterfaceType(.cellular) ? "cellular" : "other"
             let pathKey = "\(desc)-\(path.status)"
-
             if self.currentNetworkPath.isEmpty {
                 self.currentNetworkPath = pathKey
                 self.fileLog("Network: \(desc) (\(path.status))")
             } else if pathKey != self.currentNetworkPath {
-                self.fileLog("Network CHANGED: \(self.currentNetworkPath) → \(pathKey) — restarting xray")
+                self.fileLog("Network changed: \(self.currentNetworkPath) → \(pathKey) (no restart)")
                 self.currentNetworkPath = pathKey
-                self.flushLog()
-                // Brief delay to let network stabilize
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
-                    self.restartXray()
-                }
             }
         }
         monitor.start(queue: DispatchQueue.global(qos: .utility))
@@ -465,12 +571,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         isRelayRunning = false
 
         memoryTimer?.cancel(); memoryTimer = nil
+        memPressureSource?.cancel(); memPressureSource = nil
         pathMonitor?.cancel(); pathMonitor = nil
         readSource?.cancel(); readSource = nil
 
         if appSideFd >= 0 { close(appSideFd); appSideFd = -1 }
         if tunSideFd >= 0 { close(tunSideFd); tunSideFd = -1 }
         readBuf?.deallocate(); readBuf = nil
+        txIov?.deallocate(); txIov = nil
 
         hev_socks5_tunnel_quit()
         _ = LibXrayStopXray()

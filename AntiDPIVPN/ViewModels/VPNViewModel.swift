@@ -301,11 +301,15 @@ class VPNViewModel: ObservableObject {
             bandwidth = currentProfile.antiDPISettings.bandwidthLimitKBs
         }
 
-        var debugLogPath: String? = nil
+        // debugLogPath = mimicry per-write dump (60 writes/sec, I/O-heavy) — keep off.
+        // xrayLogPath = xray-core warning-level log (~1/sec, cheap) — keep on. This
+        // is our only Go-side signal after the extension is killed.
+        let debugLogPath: String? = nil
+        var xrayLogPath: String? = nil
         if let containerURL = sharedContainerURL {
             let logsDir = containerURL.appendingPathComponent("Logs")
             try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
-            debugLogPath = logsDir.appendingPathComponent("antidpi-debug.log").path
+            xrayLogPath = logsDir.appendingPathComponent("xray-core.log").path
         }
 
         // Expand geosite rules in main app (no memory limit here)
@@ -319,7 +323,7 @@ class VPNViewModel: ObservableObject {
         }
 
         guard let config = ConfigGenerator.generateXrayConfig(
-            from: currentProfile, routeConfig: expandedRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath
+            from: currentProfile, routeConfig: expandedRoute, bandwidthKBs: bandwidth, debugLogPath: debugLogPath, xrayLogPath: xrayLogPath
         ) else {
             addLog("Failed to generate Xray config")
             return

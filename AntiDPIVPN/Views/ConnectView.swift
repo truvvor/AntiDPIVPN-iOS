@@ -22,7 +22,7 @@ struct ConnectView: View {
                 VStack(spacing: 32) {
                     // Header
                     VStack(spacing: 12) {
-                        Text("AntiDPI VPN")
+                        Text("GP is against RKN")
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
 
