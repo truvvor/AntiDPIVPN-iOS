@@ -43,7 +43,7 @@ jobs:
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             archive \
             -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8 \
+            -authenticationKeyPath /Users/gk/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8 \
             -authenticationKeyID 4RA5988Z6S \
             -authenticationKeyIssuerID e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc \
             CODE_SIGN_STYLE=Automatic \
