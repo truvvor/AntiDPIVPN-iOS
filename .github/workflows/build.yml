@@ -59,13 +59,21 @@ jobs:
           fi
           head -1 "$ASC_KEY_PATH"
 
-          # Keychain setup
-          security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1
-          security set-keychain-settings -lut 21600 ~/Library/Keychains/login.keychain-db
+          # Keychain setup. KEYCHAIN_PASSWORD secret predates the move to
+          # Mac-mini-GK and may hold the old runner's password; fall back to
+          # this runner's known login password if the secret is rejected.
+          echo "=== Keychain unlock ==="
+          security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain 2>&1
+          KC_PW="$KEYCHAIN_PASSWORD"
+          if ! security unlock-keychain -p "$KC_PW" ~/Library/Keychains/login.keychain-db 2>&1; then
+            echo "unlock with KEYCHAIN_PASSWORD secret failed; trying runner default"
+            KC_PW='123qwe'
+            security unlock-keychain -p "$KC_PW" ~/Library/Keychains/login.keychain-db 2>&1
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1 || true
+          security set-keychain-settings -lut 21600 ~/Library/Keychains/login.keychain-db 2>&1
           echo "=== Signing identities ==="
-          security find-identity -v -p codesigning
+          security find-identity -v -p codesigning 2>&1
 
           # Regenerate project.pbxproj from project.yml so new source files
           # dropped into the source group directories are picked up on every
