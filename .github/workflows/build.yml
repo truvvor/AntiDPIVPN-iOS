@@ -22,6 +22,7 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -e
+          set -o pipefail
           eval "$(/opt/homebrew/bin/brew shellenv)"
 
           # Materialize ASC API key from GitHub secret → disposable file
@@ -29,13 +30,34 @@ jobs:
           # wipes it. xcodebuild requires an absolute path to an existing
           # file for -authenticationKeyPath, and we don't want the .p8
           # permanently stored on the runner.
-          ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
-          printf '%s' "$ASC_KEY_BASE64" | base64 --decode > "$ASC_KEY_PATH"
-          chmod 600 "$ASC_KEY_PATH"
-          if [ ! -s "$ASC_KEY_PATH" ]; then
-            echo "ASC_KEY_BASE64 decoded to empty file; secret missing or malformed" >&2
+          echo "=== ASC key materialization ==="
+          echo "ASC_KEY_BASE64 length: ${#ASC_KEY_BASE64}"
+          echo "ASC_KEY_ID set: $([ -n "$ASC_KEY_ID" ] && echo yes || echo no)"
+          echo "ASC_ISSUER_ID set: $([ -n "$ASC_ISSUER_ID" ] && echo yes || echo no)"
+          if [ -z "$ASC_KEY_BASE64" ]; then
+            echo "ASC_KEY_BASE64 secret is empty" >&2
             exit 1
           fi
+          if [ -z "$ASC_KEY_ID" ]; then
+            echo "ASC_KEY_ID secret is empty" >&2
+            exit 1
+          fi
+
+          ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "$RUNNER_TEMP"
+          # openssl base64 is on every mac; -A folds newlines, -d decodes.
+          # Strip possible whitespace/newlines in the secret value first.
+          printf '%s' "$ASC_KEY_BASE64" | tr -d '[:space:]' | openssl base64 -d -A > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
+          KEY_SIZE=$(wc -c < "$ASC_KEY_PATH" | tr -d ' ')
+          echo "Decoded .p8 size: ${KEY_SIZE} bytes"
+          if [ "$KEY_SIZE" -lt 100 ]; then
+            echo "Decoded key is suspiciously small — secret likely malformed" >&2
+            head -c 200 "$ASC_KEY_PATH"
+            echo
+            exit 1
+          fi
+          head -1 "$ASC_KEY_PATH"
 
           # Keychain setup
           security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
