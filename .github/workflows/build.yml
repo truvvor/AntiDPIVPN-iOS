@@ -16,13 +16,31 @@ jobs:
       - name: Build and Upload
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -e
           eval "$(/opt/homebrew/bin/brew shellenv)"
+
+          # Materialize ASC API key from GitHub secret → disposable file
+          # under RUNNER_TEMP so each run gets a fresh copy and cleanup
+          # wipes it. xcodebuild requires an absolute path to an existing
+          # file for -authenticationKeyPath, and we don't want the .p8
+          # permanently stored on the runner.
+          ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_KEY_BASE64" | base64 --decode > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
+          if [ ! -s "$ASC_KEY_PATH" ]; then
+            echo "ASC_KEY_BASE64 decoded to empty file; secret missing or malformed" >&2
+            exit 1
+          fi
+
           # Keychain setup
           security list-keychains -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
-          security unlock-keychain -p '123qwe' ~/Library/Keychains/login.keychain-db
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k '123qwe' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1
           security set-keychain-settings -lut 21600 ~/Library/Keychains/login.keychain-db
           echo "=== Signing identities ==="
           security find-identity -v -p codesigning
@@ -36,19 +54,6 @@ jobs:
           fi
           xcodegen generate --spec project.yml
 
-          # Diagnose ASC key visibility to the runner process
-          echo "=== Runner identity ==="
-          whoami
-          id
-          echo "HOME=$HOME"
-          echo "=== ASC key file check ==="
-          ASC_KEY="/Users/gk/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8"
-          ls -la /Users/gk/ 2>&1 | head -5 || echo "cannot list /Users/gk"
-          ls -la /Users/gk/.appstoreconnect/ 2>&1 || echo "cannot list .appstoreconnect"
-          ls -la /Users/gk/.appstoreconnect/private_keys/ 2>&1 || echo "cannot list private_keys"
-          ls -la "$ASC_KEY" 2>&1 || echo "cannot stat key file"
-          [ -r "$ASC_KEY" ] && echo "key READABLE" || echo "key NOT READABLE"
-
           # Archive
           xcodebuild -scheme AntiDPIVPN \
             -sdk iphoneos \
@@ -56,9 +61,9 @@ jobs:
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             archive \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY" \
-            -authenticationKeyID 4RA5988Z6S \
-            -authenticationKeyIssuerID e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=WJWU38ALPB
 
@@ -99,8 +104,8 @@ jobs:
           xcrun altool --upload-app \
             -f $RUNNER_TEMP/export/AntiDPIVPN.ipa \
             -t ios \
-            --apiKey 4RA5988Z6S \
-            --apiIssuer e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
 
           # Stage dSYMs + app binary for artifact upload BEFORE cleanup
           mkdir -p "$RUNNER_TEMP/debug_symbols"
@@ -124,4 +129,4 @@ jobs:
           rm -rf ${{ runner.temp }}/AntiDPIVPN.xcarchive
           rm -rf ${{ runner.temp }}/export
           rm -f ${{ runner.temp }}/ExportOptions.plist
-
+          rm -f ${{ runner.temp }}/AuthKey_*.p8
