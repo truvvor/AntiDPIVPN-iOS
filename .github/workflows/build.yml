@@ -36,6 +36,19 @@ jobs:
           fi
           xcodegen generate --spec project.yml
 
+          # Diagnose ASC key visibility to the runner process
+          echo "=== Runner identity ==="
+          whoami
+          id
+          echo "HOME=$HOME"
+          echo "=== ASC key file check ==="
+          ASC_KEY="/Users/gk/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8"
+          ls -la /Users/gk/ 2>&1 | head -5 || echo "cannot list /Users/gk"
+          ls -la /Users/gk/.appstoreconnect/ 2>&1 || echo "cannot list .appstoreconnect"
+          ls -la /Users/gk/.appstoreconnect/private_keys/ 2>&1 || echo "cannot list private_keys"
+          ls -la "$ASC_KEY" 2>&1 || echo "cannot stat key file"
+          [ -r "$ASC_KEY" ] && echo "key READABLE" || echo "key NOT READABLE"
+
           # Archive
           xcodebuild -scheme AntiDPIVPN \
             -sdk iphoneos \
@@ -43,7 +56,7 @@ jobs:
             -archivePath $RUNNER_TEMP/AntiDPIVPN.xcarchive \
             archive \
             -allowProvisioningUpdates \
-            -authenticationKeyPath /Users/gk/.appstoreconnect/private_keys/AuthKey_4RA5988Z6S.p8 \
+            -authenticationKeyPath "$ASC_KEY" \
             -authenticationKeyID 4RA5988Z6S \
             -authenticationKeyIssuerID e51df9f1-5d4a-4eb9-83e1-a8d49966cdfc \
             CODE_SIGN_STYLE=Automatic \
